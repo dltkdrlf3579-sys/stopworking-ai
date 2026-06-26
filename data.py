@@ -8,11 +8,6 @@ from typing import Any
 
 import pandas as pd
 
-try:
-    from IQADB_CONNECT310 import *  # noqa: F401,F403
-except ImportError:
-    pass
-
 
 REQUIRED_COLUMNS = [
     "출원번호",
@@ -50,13 +45,12 @@ def load_df(config: Any) -> pd.DataFrame:
 def load_df_from_company_db(config: Any) -> pd.DataFrame:
     """사내 DB 연결 지점.
 
-    config.ini의 [data] module_folder에 IQADB_CONNECT310.py가 있는 폴더를 넣으면
-    sys.path에 추가한 뒤 executeSQL(query)를 호출합니다.
+    사용자가 작성한 execute_SQL(query)를 가져와 그대로 호출합니다.
     """
     add_module_folder_to_path(config)
     query = read_query(config)
-    execute_sql = get_execute_sql()
-    return execute_sql(query)
+    execute_SQL = load_execute_sql(config)
+    return execute_SQL(query)
 
 
 def add_module_folder_to_path(config: Any) -> None:
@@ -69,24 +63,24 @@ def add_module_folder_to_path(config: Any) -> None:
         sys.path.insert(0, abs_module_folder)
 
 
-def get_execute_sql():
-    execute_sql = globals().get("executeSQL")
-    if callable(execute_sql):
-        return execute_sql
+def load_execute_sql(config: Any):
+    adapter_module_name = config.get("data", "sql_adapter_module", fallback="sql_adapter").strip()
+    if not adapter_module_name:
+        adapter_module_name = "sql_adapter"
 
     try:
-        module = importlib.import_module("IQADB_CONNECT310")
+        adapter_module = importlib.import_module(adapter_module_name)
     except ImportError as exc:
         raise ImportError(
-            "IQADB_CONNECT310을 import하지 못했습니다. "
-            "config.ini의 [data] module_folder에 IQADB_CONNECT310.py가 있는 폴더를 넣으세요."
+            f"{adapter_module_name}.py를 import하지 못했습니다. "
+            "config.ini의 [data] module_folder 또는 sql_adapter_module 값을 확인하세요."
         ) from exc
 
-    execute_sql = getattr(module, "executeSQL", None)
-    if not callable(execute_sql):
-        raise AttributeError("IQADB_CONNECT310 모듈에서 executeSQL 함수를 찾지 못했습니다.")
+    execute_SQL = getattr(adapter_module, "execute_SQL", None)
+    if not callable(execute_SQL):
+        raise AttributeError(f"{adapter_module_name}.py 안에서 execute_SQL(query) 함수를 찾지 못했습니다.")
 
-    return execute_sql
+    return execute_SQL
 
 
 def read_query(config: Any) -> str:
