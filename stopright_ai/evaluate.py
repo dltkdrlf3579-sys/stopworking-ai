@@ -9,12 +9,19 @@ from .case_prepare import row_to_case
 from .judge import judge_case
 
 
-def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str) -> tuple[pd.DataFrame, dict]:
+def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label: str = "policy") -> tuple[pd.DataFrame, dict]:
     max_workers = config.getint("runtime", "max_workers", fallback=8)
     mode = config.get("runtime", "judge_mode", fallback="tournament")
+    progress_every = config.getint("runtime", "progress_every", fallback=10)
 
     records = list(df.to_dict("records"))
     results: list[dict] = []
+    total = len(records)
+
+    print(
+        f"[{label}] start: rows={total}, mode={mode}, max_workers={max_workers}",
+        flush=True,
+    )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
@@ -22,11 +29,17 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str) -> tup
             case = row_to_case(row, config)
             futures.append(executor.submit(_safe_judge_case, case, llm, policy, mode))
 
-        for future in as_completed(futures):
+        for done, future in enumerate(as_completed(futures), start=1):
             results.append(future.result())
+            if done == total or (progress_every > 0 and done % progress_every == 0):
+                print(f"[{label}] progress: {done}/{total}", flush=True)
 
     pred_df = pd.DataFrame(results)
     metrics = compute_metrics(pred_df)
+    print(
+        f"[{label}] done: accuracy={metrics.get('accuracy', 0):.4f}, score={metrics.get('score', 0):.4f}",
+        flush=True,
+    )
     return pred_df, metrics
 
 
@@ -113,4 +126,3 @@ def safe_div(num: int | float, den: int | float) -> float:
     if den == 0:
         return 0.0
     return float(num / den)
-

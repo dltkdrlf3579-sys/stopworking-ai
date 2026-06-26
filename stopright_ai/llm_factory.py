@@ -25,6 +25,7 @@ def create_llm(config: Any):
 
     base_url = _optional(config, "llm", "base_url")
     model_name = _model_name(config)
+    _validate_required_llm_config(config, base_url, model_name)
     temperature = config.getfloat("llm", "temperature", fallback=0.0)
     max_retries = config.getint("llm", "max_retries", fallback=2)
 
@@ -49,13 +50,28 @@ def _build_default_headers(config: Any) -> dict[str, str]:
     headers = {
         "Content-Type": config.get("llm", "content_type", fallback="application/json").strip() or "application/json",
         "x-dep-ticket": _optional(config, "llm", "x_dep_ticket"),
-        "Send-System_Name": _optional(config, "llm", "send_system_name"),
-        "User_Id": _optional(config, "llm", "user_id"),
-        "User_Type": _optional(config, "llm", "user_type"),
-        "Prompt-Msg_Id": _uuid_or_value(config, "llm", "prompt_msg_id"),
+        "Send-System-Name": _optional(config, "llm", "send_system_name"),
+        "User-Id": _optional(config, "llm", "user_id"),
+        "User-Type": _optional(config, "llm", "user_type"),
+        "Prompt-Msg-Id": _uuid_or_value(config, "llm", "prompt_msg_id"),
         "Completion-Msg-Id": _uuid_or_value(config, "llm", "completion_msg_id"),
     }
     return {key: value for key, value in headers.items() if value}
+
+
+def _validate_required_llm_config(config: Any, base_url: str, model_name: str) -> None:
+    missing = []
+    if not base_url:
+        missing.append("base_url")
+    if not model_name:
+        missing.append("model_name")
+
+    for key in ["x_dep_ticket", "send_system_name", "user_id", "user_type"]:
+        if not _optional(config, "llm", key):
+            missing.append(key)
+
+    if missing:
+        raise ValueError("config.ini의 [llm] 필수값이 비어 있습니다: " + ", ".join(missing))
 
 
 def _model_name(config: Any) -> str:

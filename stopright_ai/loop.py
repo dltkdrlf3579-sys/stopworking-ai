@@ -39,17 +39,23 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
     eval_df = build_eval_df(df, config)
     current_policy = load_policy(config)
 
-    base_pred_df, base_metrics = evaluate_policy(eval_df, llm, config, current_policy)
+    print(f"[cycle {cycle}] run_dir={run_dir}", flush=True)
+    print(f"[cycle {cycle}] evaluation rows={len(eval_df)}", flush=True)
+
+    base_pred_df, base_metrics = evaluate_policy(eval_df, llm, config, current_policy, label="baseline")
     save_predictions(run_dir / "baseline_predictions.csv", base_pred_df)
     save_json(run_dir / "baseline_metrics.json", base_metrics)
     append_hard_cases(config, base_pred_df)
 
     error_clusters = build_error_clusters(base_pred_df)
     save_json(run_dir / "error_clusters.json", error_clusters)
+    print(f"[cycle {cycle}] error_clusters={len(error_clusters)}", flush=True)
 
     candidate_count = config.getint("policy", "candidate_count", fallback=3)
+    print(f"[cycle {cycle}] generating candidates: count={candidate_count}", flush=True)
     candidates = generate_candidate_policies(llm, current_policy, error_clusters, candidate_count)
     save_json(run_dir / "candidate_manifest.json", candidates)
+    print(f"[cycle {cycle}] generated candidates={len(candidates)}", flush=True)
 
     winner = {
         "name": "baseline",
@@ -68,7 +74,7 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         (candidate_dir / "policy.md").write_text(policy_text, encoding="utf-8")
         (candidate_dir / "hypothesis.txt").write_text(candidate.get("hypothesis", ""), encoding="utf-8")
 
-        pred_df, metrics = evaluate_policy(eval_df, llm, config, policy_text)
+        pred_df, metrics = evaluate_policy(eval_df, llm, config, policy_text, label=f"candidate:{candidate['name']}")
         save_predictions(candidate_dir / "predictions.csv", pred_df)
         save_json(candidate_dir / "metrics.json", metrics)
 
@@ -108,4 +114,3 @@ def sanitize_name(name: str) -> str:
         else:
             keep.append("_")
     return "".join(keep)[:80] or "candidate"
-
