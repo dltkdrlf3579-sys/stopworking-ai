@@ -17,12 +17,11 @@ def create_llm(config: Any):
 
     try:
         from langchain_openai import ChatOpenAI
+        from langchain_core.messages import HumanMessage  # noqa: F401
     except ImportError as exc:
-        raise ImportError("pip install langchain-openai 이 필요합니다.") from exc
+        raise ImportError("pip install langchain-openai langchain-core 이 필요합니다.") from exc
 
-    api_key = _optional(config, "llm", "api_key")
-    if api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
+    os.environ["OPENAI_API_KEY"] = "api_key"
 
     base_url = _optional(config, "llm", "base_url")
     model_name = _model_name(config)
