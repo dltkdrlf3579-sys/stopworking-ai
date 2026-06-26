@@ -53,6 +53,25 @@ def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str) -> dict:
     try:
         return judge_case(case=case, llm=llm, policy=policy, mode=mode)
     except Exception as exc:
+        if is_context_length_error(exc):
+            return {
+                "id": case.get("id", ""),
+                "label": case.get("label", ""),
+                "pred": "보류",
+                "correct": False,
+                "confidence": 0,
+                "reason": f"토큰 한계로 판정 보류: {exc}",
+                "applied_step": "CONTEXT_LIMIT",
+                "review_needed": True,
+                "exclude_from_metrics": True,
+                "decisive_evidence": [],
+                "evidence": {},
+                "major": case.get("major", ""),
+                "middle": case.get("middle", ""),
+                "title": case.get("title", ""),
+                "error": str(exc),
+            }
+
         return {
             "id": case.get("id", ""),
             "label": case.get("label", ""),
@@ -68,15 +87,41 @@ def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str) -> dict:
             "middle": case.get("middle", ""),
             "title": case.get("title", ""),
             "error": str(exc),
+            "exclude_from_metrics": False,
         }
 
 
 def compute_metrics(pred_df: pd.DataFrame) -> dict:
     if pred_df.empty:
-        return {"n": 0, "score": 0}
+        return {"total_n": 0, "n": 0, "excluded_n": 0, "score": 0}
 
-    labels = pred_df["label"]
-    preds = pred_df["pred"]
+    excluded = pred_df.get("exclude_from_metrics", False)
+    if not isinstance(excluded, pd.Series):
+        excluded = pd.Series([bool(excluded)] * len(pred_df), index=pred_df.index)
+
+    eval_df = pred_df[~excluded.fillna(False).astype(bool)].copy()
+    excluded_n = int(len(pred_df) - len(eval_df))
+
+    if eval_df.empty:
+        return {
+            "total_n": int(len(pred_df)),
+            "n": 0,
+            "excluded_n": excluded_n,
+            "accuracy": 0,
+            "true_precision": 0,
+            "true_recall": 0,
+            "false_precision": 0,
+            "false_recall": 0,
+            "fn_true_as_false": 0,
+            "fp_false_as_true": 0,
+            "tp_true": 0,
+            "tn_false": 0,
+            "category_accuracy_gap": 0,
+            "score": 0,
+        }
+
+    labels = eval_df["label"]
+    preds = eval_df["pred"]
 
     tp_true = int(((labels == "진성") & (preds == "진성")).sum())
     fn_true = int(((labels == "진성") & (preds == "가성")).sum())
@@ -89,7 +134,7 @@ def compute_metrics(pred_df: pd.DataFrame) -> dict:
     false_precision = safe_div(tn_true, tn_true + fn_true)
     false_recall = safe_div(tn_true, tn_true + fp_true)
 
-    category_gap = category_accuracy_gap(pred_df, "major")
+    category_gap = category_accuracy_gap(eval_df, "major")
     fn_rate = safe_div(fn_true, max(1, int((labels == "진성").sum())))
     fp_rate = safe_div(fp_true, max(1, int((labels == "가성").sum())))
 
@@ -104,7 +149,9 @@ def compute_metrics(pred_df: pd.DataFrame) -> dict:
     )
 
     return {
-        "n": int(len(pred_df)),
+        "total_n": int(len(pred_df)),
+        "n": int(len(eval_df)),
+        "excluded_n": excluded_n,
         "accuracy": accuracy,
         "true_precision": true_precision,
         "true_recall": true_recall,
@@ -132,3 +179,16 @@ def safe_div(num: int | float, den: int | float) -> float:
     if den == 0:
         return 0.0
     return float(num / den)
+
+
+def is_context_length_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    markers = [
+        "maximum context length",
+        "context length",
+        "token limit",
+        "too many tokens",
+        "requested 0 output tokens",
+        "input tokens",
+    ]
+    return any(marker in text for marker in markers)

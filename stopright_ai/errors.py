@@ -11,7 +11,11 @@ from .prompts import CANDIDATE_SYSTEM, candidate_user
 
 
 def build_error_clusters(pred_df: pd.DataFrame, max_clusters: int = 12) -> list[dict]:
-    errors = pred_df[pred_df["correct"] == False].copy()
+    excluded = pred_df.get("exclude_from_metrics", False)
+    if not isinstance(excluded, pd.Series):
+        excluded = pd.Series([bool(excluded)] * len(pred_df), index=pred_df.index)
+
+    errors = pred_df[(pred_df["correct"] == False) & (~excluded.fillna(False).astype(bool))].copy()
     if errors.empty:
         return []
 

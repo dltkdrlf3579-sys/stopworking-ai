@@ -36,7 +36,23 @@ def append_hard_cases(config: Any, pred_df: pd.DataFrame) -> None:
     if hard.empty:
         return
 
-    cols = [c for c in ["id", "label", "pred", "confidence", "reason", "major", "middle", "title"] if c in hard.columns]
+    cols = [
+        c
+        for c in [
+            "id",
+            "label",
+            "pred",
+            "confidence",
+            "reason",
+            "major",
+            "middle",
+            "title",
+            "applied_step",
+            "exclude_from_metrics",
+            "error",
+        ]
+        if c in hard.columns
+    ]
     hard = hard[cols].drop_duplicates()
 
     if hard_path.exists():
@@ -44,4 +60,3 @@ def append_hard_cases(config: Any, pred_df: pd.DataFrame) -> None:
         hard = pd.concat([old, hard], ignore_index=True).drop_duplicates()
 
     hard.to_csv(hard_path, index=False, encoding="utf-8-sig")
-

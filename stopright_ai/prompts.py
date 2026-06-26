@@ -16,7 +16,11 @@ def evidence_user(case: dict) -> str:
 대분류: {case.get("major", "")}
 중분류: {case.get("middle", "")}
 현상 텍스트: {case.get("phenomenon_text", "")}
-이미지 개수: {case.get("image_count", 0)}
+사용 이미지 개수: {case.get("image_count", 0)}
+원본 이미지 개수: {case.get("original_image_count", case.get("image_count", 0))}
+생략 이미지 개수: {case.get("omitted_image_count", 0)}
+현상 사용 이미지 개수: {case.get("phenomenon_image_count", 0)}
+조치 사용 이미지 개수: {case.get("action_image_count", 0)}
 이미지 파일: {case.get("image_paths", [])}
 조치: {case.get("action", "")}
 
@@ -166,4 +170,3 @@ def candidate_user(current_policy: str, error_clusters: list[dict], candidate_co
   ]
 }}
 """
-
