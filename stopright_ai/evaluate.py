@@ -7,12 +7,18 @@ import pandas as pd
 
 from .case_prepare import row_to_case
 from .judge import judge_case
+from .llm_json import configure_llm_runtime
 
 
 def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label: str = "policy") -> tuple[pd.DataFrame, dict]:
     max_workers = config.getint("runtime", "max_workers", fallback=8)
     mode = config.get("runtime", "judge_mode", fallback="tournament")
     progress_every = config.getint("runtime", "progress_every", fallback=10)
+    configure_llm_runtime(
+        calls_per_minute=config.getint("runtime", "llm_calls_per_minute", fallback=25),
+        retry_wait_seconds=config.getint("runtime", "llm_retry_wait_seconds", fallback=300),
+        max_attempts=config.getint("runtime", "llm_max_attempts", fallback=20),
+    )
 
     records = list(df.to_dict("records"))
     results: list[dict] = []

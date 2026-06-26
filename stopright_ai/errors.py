@@ -61,11 +61,16 @@ def generate_candidate_policies(llm: Any, current_policy: str, error_clusters: l
     if not error_clusters:
         return []
 
-    response = invoke_json(
-        llm,
-        CANDIDATE_SYSTEM,
-        candidate_user(current_policy=current_policy, error_clusters=error_clusters, candidate_count=candidate_count),
-    )
+    try:
+        response = invoke_json(
+            llm,
+            CANDIDATE_SYSTEM,
+            candidate_user(current_policy=current_policy, error_clusters=error_clusters, candidate_count=candidate_count),
+        )
+    except Exception as exc:
+        print(f"[candidate-generation] failed, skip candidates: {exc}", flush=True)
+        return []
+
     candidates = response.get("candidates", [])
     if not isinstance(candidates, list):
         return []
@@ -95,4 +100,3 @@ def compact_json(value: Any, limit: int = 1000) -> str:
     if len(text) > limit:
         return text[:limit] + "..."
     return text
-

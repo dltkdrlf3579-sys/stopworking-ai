@@ -10,6 +10,7 @@ from .artifacts import append_hard_cases, make_run_dir, save_json, save_predicti
 from .errors import build_error_clusters, generate_candidate_policies
 from .evaluate import evaluate_policy
 from .llm_factory import create_llm
+from .llm_json import configure_llm_runtime
 from .policy import load_policy, save_policy, should_promote
 from .sampling import build_eval_df
 
@@ -17,6 +18,7 @@ from .sampling import build_eval_df
 def run_improvement_loop(df: pd.DataFrame, config: Any, llm: Any | None = None) -> None:
     if llm is None:
         llm = create_llm(config)
+    configure_llm_runtime_from_config(config)
 
     max_cycles = config.getint("runtime", "max_cycles", fallback=1)
     sleep_seconds = config.getint("runtime", "sleep_seconds", fallback=0)
@@ -35,6 +37,7 @@ def run_improvement_loop(df: pd.DataFrame, config: Any, llm: Any | None = None) 
 
 
 def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> dict:
+    configure_llm_runtime_from_config(config)
     run_dir = make_run_dir(config)
     eval_df = build_eval_df(df, config)
     current_policy = load_policy(config)
@@ -104,6 +107,14 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
     }
     save_json(run_dir / "cycle_result.json", result)
     return result
+
+
+def configure_llm_runtime_from_config(config: Any) -> None:
+    configure_llm_runtime(
+        calls_per_minute=config.getint("runtime", "llm_calls_per_minute", fallback=25),
+        retry_wait_seconds=config.getint("runtime", "llm_retry_wait_seconds", fallback=300),
+        max_attempts=config.getint("runtime", "llm_max_attempts", fallback=20),
+    )
 
 
 def sanitize_name(name: str) -> str:
