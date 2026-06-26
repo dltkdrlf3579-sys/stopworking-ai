@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import os
 from pathlib import Path
 import sys
@@ -54,7 +55,11 @@ def load_df_from_company_db(config: Any) -> pd.DataFrame:
 
 
 def add_module_folder_to_path(config: Any) -> None:
-    module_folder = config.get("data", "module_folder", fallback="").strip()
+    project_root = str(Path(__file__).resolve().parent)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    module_folder = clean_config_path(config.get("data", "module_folder", fallback=""))
     if not module_folder:
         return
 
@@ -64,16 +69,16 @@ def add_module_folder_to_path(config: Any) -> None:
 
 
 def load_execute_sql(config: Any):
-    adapter_module_name = config.get("data", "sql_adapter_module", fallback="sql_adapter").strip()
-    if not adapter_module_name:
-        adapter_module_name = "sql_adapter"
+    adapter_module_name = config.get("data", "sql_adapter_module", fallback="sql_adapter").strip() or "sql_adapter"
 
     try:
-        adapter_module = importlib.import_module(adapter_module_name)
+        adapter_module = import_adapter_module(adapter_module_name)
     except ImportError as exc:
         raise ImportError(
-            f"{adapter_module_name}.py를 import하지 못했습니다. "
-            "config.ini의 [data] module_folder 또는 sql_adapter_module 값을 확인하세요."
+            f"{adapter_module_name} import 중 실패했습니다. "
+            f"원본 에러: {exc!r}. "
+            f"module_folder={config.get('data', 'module_folder', fallback='')!r}. "
+            "sql_adapter.py 안의 IQADB_CONNECT310 import 또는 그 하위 의존성도 확인하세요."
         ) from exc
 
     execute_SQL = getattr(adapter_module, "execute_SQL", None)
@@ -83,8 +88,34 @@ def load_execute_sql(config: Any):
     return execute_SQL
 
 
+def import_adapter_module(adapter_module_name: str):
+    cleaned = clean_config_path(adapter_module_name)
+
+    if cleaned.endswith(".py") or "\\" in cleaned or "/" in cleaned:
+        adapter_path = Path(cleaned)
+        if not adapter_path.is_absolute():
+            adapter_path = Path(__file__).resolve().parent / adapter_path
+        if not adapter_path.exists():
+            raise ImportError(f"adapter file not found: {adapter_path}")
+
+        spec = importlib.util.spec_from_file_location(adapter_path.stem, adapter_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load adapter spec: {adapter_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    if cleaned.endswith(".py"):
+        cleaned = cleaned[:-3]
+    return importlib.import_module(cleaned)
+
+
+def clean_config_path(value: str) -> str:
+    return value.strip().strip('"').strip("'")
+
+
 def read_query(config: Any) -> str:
-    query_file = config.get("data", "query_file", fallback="queries/main.sql").strip()
+    query_file = clean_config_path(config.get("data", "query_file", fallback="queries/main.sql"))
     path = Path(query_file)
     if not path.exists():
         raise FileNotFoundError(f"Query file not found: {path.resolve()}")
