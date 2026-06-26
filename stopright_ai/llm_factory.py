@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any
 
@@ -19,22 +20,24 @@ def create_llm(config: Any):
     except ImportError as exc:
         raise ImportError("pip install langchain-openai 이 필요합니다.") from exc
 
-    model = config.get("llm", "model", fallback="gpt-4.1-mini")
+    api_key = _optional(config, "llm", "api_key")
+    if api_key:
+        os.environ["OPENAI_API_KEY"] = api_key
+
+    base_url = _optional(config, "llm", "base_url")
+    model_name = _model_name(config)
     temperature = config.getfloat("llm", "temperature", fallback=0.0)
     max_retries = config.getint("llm", "max_retries", fallback=2)
 
     kwargs: dict[str, Any] = {
-        "model": model,
+        "model": model_name,
         "temperature": temperature,
         "max_retries": max_retries,
     }
 
-    optional_kwargs = {
-        "base_url": _optional(config, "llm", "base_url"),
-        "openai_proxy": _optional(config, "llm", "openai_proxy"),
-        "api_key": _optional(config, "llm", "api_key"),
-    }
-    kwargs.update({key: value for key, value in optional_kwargs.items() if value})
+    if base_url:
+        kwargs["base_url"] = base_url
+        kwargs["openai_proxy"] = base_url
 
     default_headers = _build_default_headers(config)
     if default_headers:
@@ -46,14 +49,22 @@ def create_llm(config: Any):
 def _build_default_headers(config: Any) -> dict[str, str]:
     headers = {
         "Content-Type": config.get("llm", "content_type", fallback="application/json").strip() or "application/json",
-        "X-dep_ticket": _optional(config, "llm", "x_dep_ticket"),
-        "Send-System-Name": _optional(config, "llm", "send_system_name"),
-        "User-Id": _optional(config, "llm", "user_id"),
-        "User-Type": _optional(config, "llm", "user_type"),
-        "Prompt-MSG-ID": _uuid_or_value(config, "llm", "prompt_msg_id"),
+        "x-dep-ticket": _optional(config, "llm", "x_dep_ticket"),
+        "Send-System_Name": _optional(config, "llm", "send_system_name"),
+        "User_Id": _optional(config, "llm", "user_id"),
+        "User_Type": _optional(config, "llm", "user_type"),
+        "Prompt-Msg_Id": _uuid_or_value(config, "llm", "prompt_msg_id"),
         "Completion-Msg-Id": _uuid_or_value(config, "llm", "completion_msg_id"),
     }
     return {key: value for key, value in headers.items() if value}
+
+
+def _model_name(config: Any) -> str:
+    model_name = _optional(config, "llm", "model_name")
+    if model_name:
+        return model_name
+    old_model_key = _optional(config, "llm", "model")
+    return old_model_key or "gpt-4.1-mini"
 
 
 def _optional(config: Any, section: str, option: str) -> str:
