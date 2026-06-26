@@ -29,10 +29,13 @@ def load_df(config: Any) -> pd.DataFrame:
     """
     mode = config.get("data", "mode", fallback="adapter").strip().lower()
     path = config.get("data", "path", fallback="").strip()
+    print(f"[data] load mode={mode}", flush=True)
 
     if mode == "csv":
+        print(f"[data] reading csv: {path}", flush=True)
         df = pd.read_csv(path)
     elif mode == "parquet":
+        print(f"[data] reading parquet: {path}", flush=True)
         df = pd.read_parquet(path)
     elif mode == "adapter":
         df = load_df_from_company_db(config)
@@ -50,8 +53,12 @@ def load_df_from_company_db(config: Any) -> pd.DataFrame:
     """
     add_module_folder_to_path(config)
     query = read_query(config)
+    print(f"[data] query loaded: chars={len(query)}", flush=True)
     execute_SQL = load_execute_sql(config)
-    return execute_SQL(query)
+    print("[data] executing SQL", flush=True)
+    df = execute_SQL(query)
+    print(f"[data] SQL completed: rows={len(df)}, cols={len(df.columns)}", flush=True)
+    return df
 
 
 def add_module_folder_to_path(config: Any) -> None:

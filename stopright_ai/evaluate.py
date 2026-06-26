@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any
 
 import pandas as pd
@@ -14,6 +14,7 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
     max_workers = config.getint("runtime", "max_workers", fallback=8)
     mode = config.get("runtime", "judge_mode", fallback="tournament")
     progress_every = config.getint("runtime", "progress_every", fallback=10)
+    heartbeat_seconds = config.getint("runtime", "heartbeat_seconds", fallback=30)
     configure_llm_runtime(
         calls_per_minute=config.getint("runtime", "llm_calls_per_minute", fallback=25),
         retry_wait_seconds=config.getint("runtime", "llm_retry_wait_seconds", fallback=300),
@@ -35,10 +36,19 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
             case = row_to_case(row, config)
             futures.append(executor.submit(_safe_judge_case, case, llm, policy, mode))
 
-        for done, future in enumerate(as_completed(futures), start=1):
-            results.append(future.result())
-            if done == total or (progress_every > 0 and done % progress_every == 0):
-                print(f"[{label}] progress: {done}/{total}", flush=True)
+        pending = set(futures)
+        done_count = 0
+        while pending:
+            completed, pending = wait(pending, timeout=heartbeat_seconds, return_when=FIRST_COMPLETED)
+            if not completed:
+                print(f"[{label}] heartbeat: completed={done_count}/{total}, pending={len(pending)}", flush=True)
+                continue
+
+            for future in completed:
+                results.append(future.result())
+                done_count += 1
+                if done_count == total or (progress_every > 0 and done_count % progress_every == 0):
+                    print(f"[{label}] progress: {done_count}/{total}", flush=True)
 
     pred_df = pd.DataFrame(results)
     metrics = compute_metrics(pred_df)

@@ -28,12 +28,15 @@ def create_llm(config: Any):
     _validate_required_llm_config(config, base_url, model_name)
     temperature = config.getfloat("llm", "temperature", fallback=0.0)
     max_retries = config.getint("llm", "max_retries", fallback=2)
+    timeout_seconds = config.getfloat("llm", "timeout_seconds", fallback=180.0)
 
     kwargs: dict[str, Any] = {
         "model": model_name,
         "temperature": temperature,
         "max_retries": max_retries,
     }
+    if timeout_seconds > 0:
+        kwargs["timeout"] = timeout_seconds
 
     if base_url:
         kwargs["base_url"] = base_url
