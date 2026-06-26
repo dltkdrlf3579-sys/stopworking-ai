@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 
@@ -22,5 +23,46 @@ def create_llm(config: Any):
     temperature = config.getfloat("llm", "temperature", fallback=0.0)
     max_retries = config.getint("llm", "max_retries", fallback=2)
 
-    return ChatOpenAI(model=model, temperature=temperature, max_retries=max_retries)
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "temperature": temperature,
+        "max_retries": max_retries,
+    }
 
+    optional_kwargs = {
+        "base_url": _optional(config, "llm", "base_url"),
+        "openai_proxy": _optional(config, "llm", "openai_proxy"),
+        "api_key": _optional(config, "llm", "api_key"),
+    }
+    kwargs.update({key: value for key, value in optional_kwargs.items() if value})
+
+    default_headers = _build_default_headers(config)
+    if default_headers:
+        kwargs["default_headers"] = default_headers
+
+    return ChatOpenAI(**kwargs)
+
+
+def _build_default_headers(config: Any) -> dict[str, str]:
+    headers = {
+        "Content-Type": config.get("llm", "content_type", fallback="application/json").strip() or "application/json",
+        "X-dep_ticket": _optional(config, "llm", "x_dep_ticket"),
+        "Send-System-Name": _optional(config, "llm", "send_system_name"),
+        "User-Id": _optional(config, "llm", "user_id"),
+        "User-Type": _optional(config, "llm", "user_type"),
+        "Prompt-MSG-ID": _uuid_or_value(config, "llm", "prompt_msg_id"),
+        "Completion-Msg-Id": _uuid_or_value(config, "llm", "completion_msg_id"),
+    }
+    return {key: value for key, value in headers.items() if value}
+
+
+def _optional(config: Any, section: str, option: str) -> str:
+    value = config.get(section, option, fallback="").strip()
+    return "" if value.lower() in {"", "none", "null"} else value
+
+
+def _uuid_or_value(config: Any, section: str, option: str) -> str:
+    value = config.get(section, option, fallback="auto").strip()
+    if value.lower() in {"", "auto", "uuid", "uuid4"}:
+        return str(uuid.uuid4())
+    return value
