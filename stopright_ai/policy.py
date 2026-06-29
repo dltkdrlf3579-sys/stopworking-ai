@@ -38,7 +38,7 @@ def build_policy_with_addendum(current_policy: str, addendum_title: str, addendu
             "",
             "",
             f"[추가 보정 규칙: {title}]",
-            "- 아래 규칙은 기존 정책을 대체하지 않고, 오답 군집에서 반복된 경계사례에만 보완 적용한다.",
+            "- 아래 규칙은 기존 정책 적용 시 반복된 오답 군집을 보완하기 위한 추가 판단 기준이며, 기존 정책을 대체하지 않는다.",
             text,
         ]
     ).rstrip()

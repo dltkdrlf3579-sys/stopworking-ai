@@ -167,7 +167,7 @@ def candidate_user(current_policy: str, error_clusters: list[dict], candidate_co
 - addendum_text는 현재 정책 뒤에 붙일 추가 지침만 포함한다.
 - addendum_text는 1~3개 bullet로 제한한다.
 - 가능하면 "적용 조건", "판단 지침", "제외 조건"이 드러나게 쓴다.
-- 기존 정책을 대체한다는 표현을 쓰지 말고, 특정 오답 패턴에만 보완 적용한다.
+- 기존 정책 적용 시 반복된 오답 군집을 보완하기 위한 추가 판단 기준으로 작성한다.
 - 기존 정책의 출력 JSON 형식, 필수 필드명, 입력 데이터 형식은 언급하지 않는다.
 - 기존 정책을 삭제/교체/재배열하라는 지시는 쓰지 않는다.
 - 후보가 {candidate_count}개 이상이면 서로 다른 개선 방향을 가져야 한다.
