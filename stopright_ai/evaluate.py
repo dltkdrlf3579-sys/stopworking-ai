@@ -91,10 +91,10 @@ def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str, trace: bool =
         return {
             "id": case.get("id", ""),
             "label": case.get("label", ""),
-            "pred": "가성",
-            "correct": case.get("label", "") == "가성",
+            "pred": "보류",
+            "correct": False,
             "confidence": 0,
-            "reason": f"판정 실패로 보수적 가성 처리: {exc}",
+            "reason": f"판정 실패로 판정 보류: {exc}",
             "applied_step": "ERROR",
             "review_needed": True,
             "decisive_evidence": [],
@@ -103,7 +103,7 @@ def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str, trace: bool =
             "middle": case.get("middle", ""),
             "title": case.get("title", ""),
             "error": str(exc),
-            "exclude_from_metrics": False,
+            "exclude_from_metrics": True,
         }
 
 
