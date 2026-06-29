@@ -80,6 +80,10 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         candidate_dir.mkdir(parents=True, exist_ok=True)
         (candidate_dir / "policy.md").write_text(policy_text, encoding="utf-8")
         (candidate_dir / "hypothesis.txt").write_text(candidate.get("hypothesis", ""), encoding="utf-8")
+        (candidate_dir / "patch.json").write_text(
+            json_dump({"operations": candidate.get("operations", []), "patch_summary": candidate.get("patch_summary", "")}),
+            encoding="utf-8",
+        )
 
         valid_policy, validation_reason = validate_candidate_policy(current_policy, policy_text, config)
         (candidate_dir / "validation.txt").write_text(validation_reason, encoding="utf-8")
@@ -141,6 +145,12 @@ def sanitize_name(name: str) -> str:
         else:
             keep.append("_")
     return "".join(keep)[:80] or "candidate"
+
+
+def json_dump(value: Any) -> str:
+    import json
+
+    return json.dumps(value, ensure_ascii=False, indent=2)
 
 
 def format_elapsed(seconds: float) -> str:

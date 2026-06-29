@@ -143,11 +143,12 @@ def arbiter_user(case: dict, evidence: dict, policy: str, true_argument: dict | 
 
 
 CANDIDATE_SYSTEM = """너는 작업중지권 판정 정책 개선 연구원이다.
-오답 군집을 보고 후보 정책을 만든다.
-중요: 후보 정책은 현재 정책을 요약한 문서가 아니라, 현재 정책을 대체할 수 있는 완전한 정책 문서여야 한다.
-현재 정책의 핵심 정의, 판단 원칙, 입력 데이터 설명, 출력 JSON 형식은 반드시 보존하고, 오답을 줄이기 위한 부분만 최소 수정한다.
-현재 정책을 새로 쓰지 말고, 기존 문서를 그대로 유지한 상태에서 필요한 문장 1~3개만 추가/수정/삭제한다.
-정책을 무작정 길게 만들지 말고, 모순을 줄이는 방향으로 작성한다.
+오답 군집을 보고 현재 정책에 적용할 작은 패치 후보를 만든다.
+중요: 현재 정책 전문을 다시 쓰지 않는다.
+현재 정책 문서에서 특정 기준 문장 주변에 1~3개 작업만 제안한다.
+작업은 insert_after, replace_line, delete_line 중 하나만 사용한다.
+anchor 또는 target은 현재 정책에 실제 존재하는 정확한 한 줄이어야 한다.
+출력 JSON 형식, 핵심 정의, 입력 데이터 설명은 직접 수정하지 않는다.
 반드시 JSON 하나만 출력한다."""
 
 
@@ -159,20 +160,21 @@ def candidate_user(current_policy: str, error_clusters: list[dict], candidate_co
 [오답 군집]
 {error_clusters}
 
-현재 정책을 대체할 후보 정책 {candidate_count}개를 생성하라.
-각 후보는 전체 정책 텍스트여야 하며, 왜 개선될지 짧게 설명하라.
+현재 정책에 적용할 후보 패치 {candidate_count}개를 생성하라.
+각 후보는 왜 개선될지 짧게 설명하고, operations만 제시한다.
 
-[후보 정책 작성 제한]
-- policy_text는 현재 정책을 요약하거나 축약한 문서가 아니어야 한다.
-- policy_text는 현재 정책의 전체 구조를 유지하되, 오답 군집을 줄이기 위한 판단 기준만 보강해야 한다.
-- policy_text는 현재 정책을 대부분 그대로 복사하고, 변경은 꼭 필요한 소수 문장으로 제한한다.
+[후보 패치 작성 제한]
+- 현재 정책 전문을 policy_text로 출력하지 않는다.
 - 전체 재작성, 문단 순서 재배열, 출력 형식 재작성은 금지한다.
-- 현재 정책에 있는 출력 JSON 형식과 필수 필드명은 절대 삭제하지 않는다.
-- 특히 "판정", "판단근거", "확신도", "review_needed", "applied_step", "decisive_evidence" 필드는 반드시 유지한다.
+- 출력 JSON 형식과 필수 필드명은 수정하지 않는다.
+- "판정", "판단근거", "확신도", "review_needed", "applied_step", "decisive_evidence"가 있는 줄은 수정/삭제하지 않는다.
 - 후보가 {candidate_count}개 이상이면 서로 다른 개선 방향을 가져야 한다.
 - 가능하면 후보별 관점을 분리한다: FN 감소, FP 감소, 경계사례 분리.
-- 현재 정책보다 현저히 짧은 축약본을 만들지 않는다.
-- 권장 변경량은 후보당 추가/수정/삭제 합산 1~3문장이다.
+- 후보당 operations는 1~3개만 사용한다.
+- insert_after는 현재 정책에 실제 존재하는 anchor 줄 바로 아래에 새 text를 추가한다.
+- replace_line은 현재 정책에 실제 존재하는 target 줄을 replacement로 교체한다.
+- delete_line은 현재 정책에 실제 존재하는 target 줄을 삭제한다.
+- 삭제는 매우 예외적으로만 사용한다.
 
 [출력 JSON 스키마]
 {{
@@ -180,7 +182,22 @@ def candidate_user(current_policy: str, error_clusters: list[dict], candidate_co
     {{
       "name": "candidate_name",
       "hypothesis": "개선 가설",
-      "policy_text": "전체 정책 텍스트"
+      "operations": [
+        {{
+          "op": "insert_after",
+          "anchor": "현재 정책에 실제 존재하는 정확한 한 줄",
+          "text": "추가할 한 줄"
+        }},
+        {{
+          "op": "replace_line",
+          "target": "현재 정책에 실제 존재하는 정확한 한 줄",
+          "replacement": "교체할 한 줄"
+        }},
+        {{
+          "op": "delete_line",
+          "target": "현재 정책에 실제 존재하는 정확한 한 줄"
+        }}
+      ]
     }}
   ]
 }}

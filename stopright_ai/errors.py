@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from .llm_json import invoke_json
+from .policy import apply_policy_operations
 from .prompts import CANDIDATE_SYSTEM, candidate_user
 
 
@@ -84,16 +85,28 @@ def generate_candidate_policies(llm: Any, current_policy: str, error_clusters: l
         if not isinstance(candidate, dict):
             continue
         name = str(candidate.get("name") or f"candidate_{idx}")
-        policy_text = str(candidate.get("policy_text") or "").strip()
-        if policy_text:
+        operations = candidate.get("operations", [])
+        if isinstance(operations, list) and operations:
+            try:
+                policy_text, patch_summary = apply_policy_operations(current_policy, operations, _PatchConfig())
+            except Exception as exc:
+                print(f"[candidate-generation] skip invalid patch {name}: {exc}", flush=True)
+                continue
             clean.append(
                 {
                     "name": name,
                     "hypothesis": str(candidate.get("hypothesis", "")),
+                    "operations": operations,
+                    "patch_summary": patch_summary,
                     "policy_text": policy_text,
                 }
             )
     return clean
+
+
+class _PatchConfig:
+    def getint(self, section: str, option: str, fallback: int) -> int:
+        return fallback
 
 
 def compact_json(value: Any, limit: int = 1000) -> str:

@@ -18,6 +18,52 @@ def save_policy(config: Any, policy_text: str) -> None:
     path.write_text(policy_text, encoding="utf-8")
 
 
+def apply_policy_operations(current_policy: str, operations: list[dict], config: Any) -> tuple[str, str]:
+    max_operations = config.getint("policy", "candidate_max_operations", fallback=3)
+    if not operations:
+        raise ValueError("candidate patch has no operations")
+    if len(operations) > max_operations:
+        raise ValueError(f"candidate patch has too many operations: {len(operations)} > {max_operations}")
+
+    lines = current_policy.splitlines()
+    applied = []
+
+    for idx, operation in enumerate(operations, start=1):
+        if not isinstance(operation, dict):
+            raise ValueError(f"operation #{idx} is not an object")
+
+        op = str(operation.get("op", "")).strip()
+        if op == "insert_after":
+            anchor = str(operation.get("anchor", "")).rstrip()
+            text = str(operation.get("text", "")).rstrip()
+            if not anchor or not text:
+                raise ValueError(f"operation #{idx} insert_after requires anchor and text")
+            line_index = find_exact_line(lines, anchor)
+            lines.insert(line_index + 1, text)
+            applied.append(f"insert_after: {anchor} -> {text}")
+        elif op == "replace_line":
+            target = str(operation.get("target", "")).rstrip()
+            replacement = str(operation.get("replacement", "")).rstrip()
+            if not target or not replacement:
+                raise ValueError(f"operation #{idx} replace_line requires target and replacement")
+            ensure_safe_to_modify(target)
+            line_index = find_exact_line(lines, target)
+            lines[line_index] = replacement
+            applied.append(f"replace_line: {target} -> {replacement}")
+        elif op == "delete_line":
+            target = str(operation.get("target", "")).rstrip()
+            if not target:
+                raise ValueError(f"operation #{idx} delete_line requires target")
+            ensure_safe_to_modify(target)
+            line_index = find_exact_line(lines, target)
+            del lines[line_index]
+            applied.append(f"delete_line: {target}")
+        else:
+            raise ValueError(f"operation #{idx} has unsupported op: {op}")
+
+    return "\n".join(lines) + ("\n" if current_policy.endswith("\n") else ""), "\n".join(applied)
+
+
 def should_promote(base_metrics: dict, candidate_metrics: dict, config: Any) -> tuple[bool, str]:
     min_gain = config.getfloat("policy", "promotion_min_score_gain", fallback=0.01)
     max_fn_regression = config.getint("policy", "promotion_max_fn_regression", fallback=0)
@@ -69,6 +115,30 @@ def validate_candidate_policy(current_policy: str, candidate_policy: str, config
         return False, f"candidate policy changed too many lines: {changed['changed']} > {max_changed_lines}"
 
     return True, "candidate policy valid"
+
+
+def find_exact_line(lines: list[str], target: str) -> int:
+    matches = [idx for idx, line in enumerate(lines) if line.rstrip() == target.rstrip()]
+    if not matches:
+        raise ValueError(f"target line not found in current policy: {target}")
+    if len(matches) > 1:
+        raise ValueError(f"target line is ambiguous in current policy: {target}")
+    return matches[0]
+
+
+def ensure_safe_to_modify(line: str) -> None:
+    protected_terms = [
+        "판정",
+        "판단근거",
+        "확신도",
+        "review_needed",
+        "applied_step",
+        "decisive_evidence",
+        "[출력 형식]",
+        "[입력 데이터]",
+    ]
+    if any(term in line for term in protected_terms):
+        raise ValueError(f"protected policy line cannot be modified: {line}")
 
 
 def count_changed_lines(current_policy: str, candidate_policy: str) -> dict[str, int]:
