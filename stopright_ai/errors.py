@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from .llm_json import invoke_json
+from .policy import build_policy_with_addendum
 from .prompts import CANDIDATE_SYSTEM, candidate_user
 
 
@@ -84,17 +85,35 @@ def generate_candidate_policies(llm: Any, current_policy: str, error_clusters: l
         if not isinstance(candidate, dict):
             continue
         name = str(candidate.get("name") or f"candidate_{idx}")
-        policy_text = str(candidate.get("policy_text") or "").strip()
-        if policy_text:
+        addendum_title = str(candidate.get("addendum_title") or name).strip()
+        addendum_text = str(candidate.get("addendum_text") or "").strip()
+        if addendum_text:
+            try:
+                policy_text, rendered_addendum = build_policy_with_addendum(
+                    current_policy,
+                    addendum_title,
+                    addendum_text,
+                    _AddendumConfig(),
+                )
+            except Exception as exc:
+                print(f"[candidate-generation] skip invalid addendum {name}: {exc}", flush=True)
+                continue
             clean.append(
                 {
                     "name": name,
                     "hypothesis": str(candidate.get("hypothesis", "")),
-                    "change_summary": str(candidate.get("change_summary", "")),
+                    "addendum_title": addendum_title,
+                    "addendum_text": addendum_text,
+                    "rendered_addendum": rendered_addendum,
                     "policy_text": policy_text,
                 }
             )
     return clean
+
+
+class _AddendumConfig:
+    def getint(self, section: str, option: str, fallback: int) -> int:
+        return fallback
 
 
 def compact_json(value: Any, limit: int = 1000) -> str:

@@ -80,7 +80,7 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         candidate_dir.mkdir(parents=True, exist_ok=True)
         (candidate_dir / "policy.md").write_text(policy_text, encoding="utf-8")
         (candidate_dir / "hypothesis.txt").write_text(candidate.get("hypothesis", ""), encoding="utf-8")
-        (candidate_dir / "change_summary.txt").write_text(candidate.get("change_summary", ""), encoding="utf-8")
+        (candidate_dir / "addendum.md").write_text(candidate.get("rendered_addendum", ""), encoding="utf-8")
         (candidate_dir / "policy.diff").write_text(make_policy_diff(current_policy, policy_text), encoding="utf-8")
 
         valid_policy, validation_reason = validate_candidate_policy(current_policy, policy_text, config)

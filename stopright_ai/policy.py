@@ -18,50 +18,32 @@ def save_policy(config: Any, policy_text: str) -> None:
     path.write_text(policy_text, encoding="utf-8")
 
 
-def apply_policy_operations(current_policy: str, operations: list[dict], config: Any) -> tuple[str, str]:
-    max_operations = config.getint("policy", "candidate_max_operations", fallback=3)
-    if not operations:
-        raise ValueError("candidate patch has no operations")
-    if len(operations) > max_operations:
-        raise ValueError(f"candidate patch has too many operations: {len(operations)} > {max_operations}")
+def build_policy_with_addendum(current_policy: str, addendum_title: str, addendum_text: str, config: Any) -> tuple[str, str]:
+    max_lines = config.getint("policy", "candidate_max_addendum_lines", fallback=6)
+    title = addendum_title.strip() or "후보 추가 지침"
+    text = addendum_text.strip()
+    if not text:
+        raise ValueError("candidate addendum is empty")
 
-    lines = current_policy.splitlines()
-    applied = []
+    addendum_lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    if len(addendum_lines) > max_lines:
+        raise ValueError(f"candidate addendum has too many lines: {len(addendum_lines)} > {max_lines}")
 
-    for idx, operation in enumerate(operations, start=1):
-        if not isinstance(operation, dict):
-            raise ValueError(f"operation #{idx} is not an object")
+    protected_terms = ["[출력 형식]", "[입력 데이터]", "JSON 외의 설명", "필수 필드"]
+    if any(term in text for term in protected_terms):
+        raise ValueError("candidate addendum tries to modify protected output/input format")
 
-        op = str(operation.get("op", "")).strip()
-        if op == "insert_after":
-            anchor = str(operation.get("anchor", "")).rstrip()
-            text = str(operation.get("text", "")).rstrip()
-            if not anchor or not text:
-                raise ValueError(f"operation #{idx} insert_after requires anchor and text")
-            line_index = find_exact_line(lines, anchor)
-            lines.insert(line_index + 1, text)
-            applied.append(f"insert_after: {anchor} -> {text}")
-        elif op == "replace_line":
-            target = str(operation.get("target", "")).rstrip()
-            replacement = str(operation.get("replacement", "")).rstrip()
-            if not target or not replacement:
-                raise ValueError(f"operation #{idx} replace_line requires target and replacement")
-            ensure_safe_to_modify(target)
-            line_index = find_exact_line(lines, target)
-            lines[line_index] = replacement
-            applied.append(f"replace_line: {target} -> {replacement}")
-        elif op == "delete_line":
-            target = str(operation.get("target", "")).rstrip()
-            if not target:
-                raise ValueError(f"operation #{idx} delete_line requires target")
-            ensure_safe_to_modify(target)
-            line_index = find_exact_line(lines, target)
-            del lines[line_index]
-            applied.append(f"delete_line: {target}")
-        else:
-            raise ValueError(f"operation #{idx} has unsupported op: {op}")
-
-    return "\n".join(lines) + ("\n" if current_policy.endswith("\n") else ""), "\n".join(applied)
+    section = "\n".join(
+        [
+            "",
+            "",
+            f"[추가 보정 규칙: {title}]",
+            "- 아래 규칙은 기존 정책을 대체하지 않고, 오답 군집에서 반복된 경계사례에만 보완 적용한다.",
+            text,
+        ]
+    ).rstrip()
+    policy = current_policy.rstrip() + section + "\n"
+    return policy, section.lstrip()
 
 
 def should_promote(base_metrics: dict, candidate_metrics: dict, config: Any) -> tuple[bool, str]:
@@ -115,30 +97,6 @@ def validate_candidate_policy(current_policy: str, candidate_policy: str, config
         return False, f"candidate policy changed too many lines: {changed['changed']} > {max_changed_lines}"
 
     return True, "candidate policy valid"
-
-
-def find_exact_line(lines: list[str], target: str) -> int:
-    matches = [idx for idx, line in enumerate(lines) if line.rstrip() == target.rstrip()]
-    if not matches:
-        raise ValueError(f"target line not found in current policy: {target}")
-    if len(matches) > 1:
-        raise ValueError(f"target line is ambiguous in current policy: {target}")
-    return matches[0]
-
-
-def ensure_safe_to_modify(line: str) -> None:
-    protected_terms = [
-        "판정",
-        "판단근거",
-        "확신도",
-        "review_needed",
-        "applied_step",
-        "decisive_evidence",
-        "[출력 형식]",
-        "[입력 데이터]",
-    ]
-    if any(term in line for term in protected_terms):
-        raise ValueError(f"protected policy line cannot be modified: {line}")
 
 
 def count_changed_lines(current_policy: str, candidate_policy: str) -> dict[str, int]:
