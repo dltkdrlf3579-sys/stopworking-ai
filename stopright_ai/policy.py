@@ -152,3 +152,14 @@ def count_changed_lines(current_policy: str, candidate_policy: str) -> dict[str,
 
 def normalize_policy_lines(policy: str) -> list[str]:
     return [line.rstrip() for line in policy.splitlines() if line.strip()]
+
+
+def make_policy_diff(current_policy: str, candidate_policy: str) -> str:
+    diff = difflib.unified_diff(
+        current_policy.splitlines(),
+        candidate_policy.splitlines(),
+        fromfile="current_policy.md",
+        tofile="candidate_policy.md",
+        lineterm="",
+    )
+    return "\n".join(diff)
