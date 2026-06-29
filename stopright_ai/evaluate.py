@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+import time
 from typing import Any
 
 import pandas as pd
@@ -11,10 +12,12 @@ from .llm_json import configure_llm_runtime
 
 
 def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label: str = "policy") -> tuple[pd.DataFrame, dict]:
+    started = time.monotonic()
     max_workers = config.getint("runtime", "max_workers", fallback=8)
     mode = config.get("runtime", "judge_mode", fallback="tournament")
     progress_every = config.getint("runtime", "progress_every", fallback=10)
     heartbeat_seconds = config.getint("runtime", "heartbeat_seconds", fallback=30)
+    trace_first_n = config.getint("runtime", "trace_first_n", fallback=0)
     configure_llm_runtime(
         calls_per_minute=config.getint("runtime", "llm_calls_per_minute", fallback=25),
         retry_wait_seconds=config.getint("runtime", "llm_retry_wait_seconds", fallback=300),
@@ -32,9 +35,9 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
-        for row in records:
+        for idx, row in enumerate(records, start=1):
             case = row_to_case(row, config)
-            futures.append(executor.submit(_safe_judge_case, case, llm, policy, mode))
+            futures.append(executor.submit(_safe_judge_case, case, llm, policy, mode, idx <= trace_first_n))
 
         pending = set(futures)
         done_count = 0
@@ -52,16 +55,19 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
 
     pred_df = pd.DataFrame(results)
     metrics = compute_metrics(pred_df)
+    elapsed_seconds = time.monotonic() - started
+    metrics["elapsed_seconds"] = elapsed_seconds
     print(
-        f"[{label}] done: accuracy={metrics.get('accuracy', 0):.4f}, score={metrics.get('score', 0):.4f}",
+        f"[{label}] done: accuracy={metrics.get('accuracy', 0):.4f}, "
+        f"score={metrics.get('score', 0):.4f}, elapsed={format_elapsed(elapsed_seconds)}",
         flush=True,
     )
     return pred_df, metrics
 
 
-def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str) -> dict:
+def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str, trace: bool = False) -> dict:
     try:
-        return judge_case(case=case, llm=llm, policy=policy, mode=mode)
+        return judge_case(case=case, llm=llm, policy=policy, mode=mode, trace=trace)
     except Exception as exc:
         if is_context_length_error(exc):
             return {
@@ -189,6 +195,17 @@ def safe_div(num: int | float, den: int | float) -> float:
     if den == 0:
         return 0.0
     return float(num / den)
+
+
+def format_elapsed(seconds: float) -> str:
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
 
 
 def is_context_length_error(exc: Exception) -> bool:

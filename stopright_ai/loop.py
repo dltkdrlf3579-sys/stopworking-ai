@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import time
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,8 @@ def run_improvement_loop(df: pd.DataFrame, config: Any, llm: Any | None = None) 
         result = run_one_cycle(df=df, config=config, llm=llm, cycle=cycle)
         print(
             f"[cycle {cycle}] base_score={result['base_metrics'].get('score', 0):.4f} "
-            f"winner={result.get('winner_name')} promoted={result.get('promoted')}"
+            f"winner={result.get('winner_name')} promoted={result.get('promoted')}",
+            flush=True,
         )
 
         if sleep_seconds > 0:
@@ -37,6 +39,8 @@ def run_improvement_loop(df: pd.DataFrame, config: Any, llm: Any | None = None) 
 
 
 def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> dict:
+    started_at = datetime.now()
+    started = time.monotonic()
     configure_llm_runtime_from_config(config)
     run_dir = make_run_dir(config)
     eval_df = build_eval_df(df, config)
@@ -96,9 +100,14 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         save_policy(config, winner["policy_text"])
         Path(run_dir / "PROMOTED.txt").write_text(promotion_reason, encoding="utf-8")
 
+    ended_at = datetime.now()
+    elapsed_seconds = time.monotonic() - started
     result = {
         "cycle": cycle,
         "run_dir": str(run_dir),
+        "started_at": started_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "ended_at": ended_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "elapsed_seconds": elapsed_seconds,
         "base_metrics": base_metrics,
         "winner_name": winner["name"],
         "winner_metrics": winner["metrics"],
@@ -106,6 +115,7 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         "promotion_reason": promotion_reason,
     }
     save_json(run_dir / "cycle_result.json", result)
+    print(f"[cycle {cycle}] done: elapsed={format_elapsed(elapsed_seconds)}", flush=True)
     return result
 
 
@@ -125,3 +135,14 @@ def sanitize_name(name: str) -> str:
         else:
             keep.append("_")
     return "".join(keep)[:80] or "candidate"
+
+
+def format_elapsed(seconds: float) -> str:
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"

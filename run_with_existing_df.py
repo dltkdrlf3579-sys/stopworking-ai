@@ -8,10 +8,11 @@
 from __future__ import annotations
 
 from stopright_ai.config import load_config
+from stopright_ai.logging import install_timestamped_print
 from stopright_ai.loop import run_one_cycle
 
 
 def run_once_with_objects(df, llm, config_path: str = "config.ini"):
+    install_timestamped_print()
     config = load_config(config_path)
     return run_one_cycle(df=df, config=config, llm=llm)
-
