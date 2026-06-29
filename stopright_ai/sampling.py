@@ -6,9 +6,11 @@ from typing import Any
 import pandas as pd
 
 
-def build_eval_df(df: pd.DataFrame, config: Any) -> pd.DataFrame:
+def build_eval_df(df: pd.DataFrame, config: Any, cycle: int = 1) -> pd.DataFrame:
     batch_size = config.getint("runtime", "batch_size", fallback=2000)
-    seed = config.getint("sampling", "random_seed", fallback=42)
+    base_seed = config.getint("sampling", "random_seed", fallback=42)
+    vary_seed = config.getboolean("sampling", "vary_seed_by_cycle", fallback=True)
+    seed = base_seed + cycle - 1 if vary_seed else base_seed
     hard_path = Path(config.get("artifacts", "hard_cases_path", fallback="artifacts/hard_cases.csv"))
 
     base = stratified_sample(df, min(batch_size, len(df)), seed=seed)
@@ -23,7 +25,9 @@ def build_eval_df(df: pd.DataFrame, config: Any) -> pd.DataFrame:
         except Exception:
             pass
 
-    return base.head(batch_size).reset_index(drop=True)
+    if len(base) > batch_size:
+        base = base.sample(n=batch_size, random_state=seed)
+    return base.reset_index(drop=True)
 
 
 def stratified_sample(df: pd.DataFrame, n: int, seed: int = 42) -> pd.DataFrame:
@@ -39,7 +43,6 @@ def stratified_sample(df: pd.DataFrame, n: int, seed: int = 42) -> pd.DataFrame:
     sampled = (
         df.groupby(strat_cols, group_keys=False, dropna=False)
         .apply(lambda g: g.sample(n=max(1, int(round(len(g) * frac))), random_state=seed))
-        .reset_index(drop=True)
     )
 
     if len(sampled) > n:
@@ -51,4 +54,3 @@ def stratified_sample(df: pd.DataFrame, n: int, seed: int = 42) -> pd.DataFrame:
             sampled = pd.concat([sampled, add], ignore_index=True)
 
     return sampled.reset_index(drop=True)
-

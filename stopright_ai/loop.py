@@ -43,7 +43,7 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
     started = time.monotonic()
     configure_llm_runtime_from_config(config)
     run_dir = make_run_dir(config)
-    eval_df = build_eval_df(df, config)
+    eval_df = build_eval_df(df, config, cycle=cycle)
     current_policy = load_policy(config)
 
     print(f"[cycle {cycle}] run_dir={run_dir}", flush=True)
