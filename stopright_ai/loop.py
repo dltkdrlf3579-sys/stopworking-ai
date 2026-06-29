@@ -12,7 +12,7 @@ from .errors import build_error_clusters, generate_candidate_policies
 from .evaluate import evaluate_policy
 from .llm_factory import create_llm
 from .llm_json import configure_llm_runtime
-from .policy import load_policy, save_policy, should_promote
+from .policy import load_policy, save_policy, should_promote, validate_candidate_policy
 from .sampling import build_eval_df
 
 
@@ -80,6 +80,12 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         candidate_dir.mkdir(parents=True, exist_ok=True)
         (candidate_dir / "policy.md").write_text(policy_text, encoding="utf-8")
         (candidate_dir / "hypothesis.txt").write_text(candidate.get("hypothesis", ""), encoding="utf-8")
+
+        valid_policy, validation_reason = validate_candidate_policy(current_policy, policy_text, config)
+        (candidate_dir / "validation.txt").write_text(validation_reason, encoding="utf-8")
+        if not valid_policy:
+            print(f"[candidate:{candidate['name']}] skipped: {validation_reason}", flush=True)
+            continue
 
         pred_df, metrics = evaluate_policy(eval_df, llm, config, policy_text, label=f"candidate:{candidate['name']}")
         save_predictions(candidate_dir / "predictions.csv", pred_df)
