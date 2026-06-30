@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -22,8 +23,9 @@ def judge_case(case: dict, llm: Any, policy: str, mode: str = "tournament", trac
     started = time.monotonic()
     trace_log(trace, trace_id, f"start mode={mode}")
 
-    evidence = invoke_json(llm, EVIDENCE_SYSTEM, evidence_user(case))
-    trace_log(trace, trace_id, f"evidence done elapsed={time.monotonic() - started:.1f}s")
+    images = case.get("image_data_urls", []) or []
+    evidence = invoke_json(llm, EVIDENCE_SYSTEM, evidence_user(case), images=images)
+    trace_log(trace, trace_id, f"evidence done images={len(images)} elapsed={time.monotonic() - started:.1f}s")
 
     if mode == "fast":
         final = invoke_json(llm, ARBITER_SYSTEM, arbiter_user(case, evidence, policy))
@@ -54,10 +56,10 @@ def trace_log(trace: bool, trace_id: str, message: str) -> None:
 def normalize_decision(case: dict, evidence: dict, final: dict) -> dict:
     pred = str(final.get("판정", "")).strip()
     if pred not in {"진성", "가성"}:
-        pred = "진성" if "진" in pred else "가성"
+        return invalid_decision(case, evidence, final, f"invalid judgement value: {pred!r}")
 
     try:
-        confidence = int(final.get("확신도", 0))
+        confidence = parse_int(final.get("확신도", 0))
     except Exception:
         confidence = 0
 
@@ -69,10 +71,55 @@ def normalize_decision(case: dict, evidence: dict, final: dict) -> dict:
         "confidence": max(0, min(100, confidence)),
         "reason": str(final.get("판단근거", "")),
         "applied_step": str(final.get("applied_step", "")),
-        "review_needed": bool(final.get("review_needed", False)),
+        "review_needed": normalize_bool(final.get("review_needed", False)),
         "decisive_evidence": final.get("decisive_evidence", []),
         "evidence": evidence,
         "major": case.get("major", ""),
         "middle": case.get("middle", ""),
         "title": case.get("title", ""),
     }
+
+
+def invalid_decision(case: dict, evidence: dict, final: dict, reason: str) -> dict:
+    return {
+        "id": case.get("id", ""),
+        "label": case.get("label", ""),
+        "pred": "보류",
+        "correct": False,
+        "confidence": 0,
+        "reason": f"판정값 오류로 판정 보류: {reason}",
+        "applied_step": str(final.get("applied_step", "INVALID_OUTPUT")),
+        "review_needed": True,
+        "decisive_evidence": final.get("decisive_evidence", []),
+        "evidence": evidence,
+        "major": case.get("major", ""),
+        "middle": case.get("middle", ""),
+        "title": case.get("title", ""),
+        "error": reason,
+        "exclude_from_metrics": True,
+    }
+
+
+def parse_int(value: Any) -> int:
+    if isinstance(value, int):
+        return value
+    text = str(value)
+    match = re.search(r"-?\d+", text)
+    if not match:
+        return 0
+    return int(match.group(0))
+
+
+def normalize_bool(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "필요", "검토필요"}:
+        return True
+    if text in {"false", "0", "no", "n", "", "없음", "불필요"}:
+        return False
+    return False

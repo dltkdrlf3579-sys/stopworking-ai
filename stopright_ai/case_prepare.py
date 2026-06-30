@@ -38,6 +38,7 @@ def row_to_case(row: Any, config: Any) -> dict:
         max_images=max_action_images,
     )
     image_paths = phenomenon.image_paths + action.image_paths
+    image_data_urls = phenomenon.image_data_urls + action.image_data_urls
     image_count = phenomenon.image_count + action.image_count
     original_image_count = phenomenon.original_image_count + action.original_image_count
     omitted_image_count = phenomenon.omitted_image_count + action.omitted_image_count
@@ -54,6 +55,7 @@ def row_to_case(row: Any, config: Any) -> dict:
         "phenomenon_image_count": phenomenon.image_count,
         "action_image_count": action.image_count,
         "image_paths": image_paths[:max_total_images],
+        "image_data_urls": image_data_urls[:max_total_images],
         "phenomenon_truncated": phenomenon.truncated,
         "action_truncated": action.truncated,
         "action": action.text,

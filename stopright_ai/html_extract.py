@@ -31,6 +31,7 @@ class ExtractedPhenomenon:
     original_image_count: int
     omitted_image_count: int
     image_paths: list[str]
+    image_data_urls: list[str]
     truncated: bool = False
 
 
@@ -47,6 +48,7 @@ def extract_phenomenon(
 
     matches = list(DATA_IMAGE_RE.finditer(raw))
     selected_matches = limit_matches(matches, max_images)
+    image_data_urls = [match_to_data_url(match) for match in selected_matches]
     if save_images and selected_matches:
         if not image_dir:
             raise ValueError("save_images=True이면 image_dir가 필요합니다.")
@@ -63,6 +65,7 @@ def extract_phenomenon(
         original_image_count=len(matches),
         omitted_image_count=max(0, len(matches) - len(selected_matches)),
         image_paths=image_paths,
+        image_data_urls=image_data_urls,
         truncated=truncated,
     )
 
@@ -101,6 +104,13 @@ def limit_matches(matches: list[re.Match[str]], max_images: int | None) -> list[
     if max_images is None or max_images < 0:
         return matches
     return matches[:max_images]
+
+
+def match_to_data_url(match: re.Match[str]) -> str:
+    ext = match.group("ext").lower()
+    mime = "jpeg" if ext in {"jpg", "jpeg"} else ext
+    payload = re.sub(r"\s+", "", match.group("data"))
+    return f"data:image/{mime};base64,{payload}"
 
 
 def _write_images(matches: Iterable[re.Match[str]], out_dir: Path, row_id: str = "") -> list[str]:

@@ -27,7 +27,10 @@ class RateLimiter:
         with self._lock:
             self.max_calls = max(1, max_calls)
             self.window_seconds = max(1, window_seconds)
-            self._calls.clear()
+            now = time.monotonic()
+            cutoff = now - self.window_seconds
+            while self._calls and self._calls[0] <= cutoff:
+                self._calls.popleft()
 
     def wait(self) -> None:
         while True:
@@ -57,13 +60,14 @@ def configure_llm_runtime(calls_per_minute: int = 25, retry_wait_seconds: int = 
     _RUNTIME.rate_limiter.update(_RUNTIME.calls_per_minute, 60)
 
 
-def invoke_text(llm: Any, system: str, user: str) -> str:
+def invoke_text(llm: Any, system: str, user: str, images: list[str] | None = None) -> str:
     """Call LangChain-like llm and return content as text."""
     last_exc: Exception | None = None
+    image_inputs = images or []
     for attempt in range(1, _RUNTIME.max_attempts + 1):
         _RUNTIME.rate_limiter.wait()
         try:
-            return _invoke_text_once(llm, system, user)
+            return _invoke_text_once(llm, system, user, image_inputs)
         except Exception as exc:
             last_exc = exc
             if not is_retryable_llm_error(exc) or attempt >= _RUNTIME.max_attempts:
@@ -79,18 +83,42 @@ def invoke_text(llm: Any, system: str, user: str) -> str:
     raise RuntimeError("LLM 호출 재시도 한도를 초과했습니다.") from last_exc
 
 
-def _invoke_text_once(llm: Any, system: str, user: str) -> str:
+def _invoke_text_once(llm: Any, system: str, user: str, images: list[str] | None = None) -> str:
+    image_inputs = images or []
     if hasattr(llm, "invoke"):
-        try:
-            response = llm.invoke([("system", system), ("human", user)])
-        except TypeError:
-            response = llm.invoke(f"{system}\n\n{user}")
+        if image_inputs:
+            response = llm.invoke(build_messages(system, user, image_inputs))
+        else:
+            try:
+                response = llm.invoke([("system", system), ("human", user)])
+            except TypeError:
+                response = llm.invoke(f"{system}\n\n{user}")
     elif callable(llm):
-        response = llm(f"{system}\n\n{user}")
+        if image_inputs:
+            response = llm(build_messages(system, user, image_inputs))
+        else:
+            response = llm(f"{system}\n\n{user}")
     else:
         raise TypeError("llm은 .invoke(...)를 지원하거나 callable이어야 합니다.")
 
     return str(getattr(response, "content", response))
+
+
+def build_messages(system: str, user: str, images: list[str]) -> list[Any]:
+    human_content: list[dict[str, Any]] = [{"type": "text", "text": user}]
+    for image_url in images:
+        if image_url:
+            human_content.append({"type": "image_url", "image_url": {"url": image_url}})
+
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        return [SystemMessage(content=system), HumanMessage(content=human_content)]
+    except Exception:
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": human_content},
+        ]
 
 
 def is_retryable_llm_error(exc: Exception) -> bool:
@@ -128,8 +156,8 @@ def is_retryable_llm_error(exc: Exception) -> bool:
     return any(marker in text for marker in retry_markers)
 
 
-def invoke_json(llm: Any, system: str, user: str) -> dict:
-    text = invoke_text(llm, system, user)
+def invoke_json(llm: Any, system: str, user: str, images: list[str] | None = None) -> dict:
+    text = invoke_text(llm, system, user, images=images)
     return parse_json_object(text)
 
 

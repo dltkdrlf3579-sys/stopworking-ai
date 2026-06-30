@@ -13,7 +13,7 @@ from .evaluate import evaluate_policy
 from .llm_factory import create_llm
 from .llm_json import configure_llm_runtime
 from .policy import load_policy, make_policy_diff, save_policy, should_promote, validate_candidate_policy
-from .sampling import build_eval_df
+from .sampling import build_train_validation_dfs
 
 
 def run_improvement_loop(df: pd.DataFrame, config: Any, llm: Any | None = None) -> None:
@@ -43,32 +43,43 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
     started = time.monotonic()
     configure_llm_runtime_from_config(config)
     run_dir = make_run_dir(config)
-    eval_df = build_eval_df(df, config, cycle=cycle)
+    train_df, validation_df = build_train_validation_dfs(df, config, cycle=cycle)
     current_policy = load_policy(config)
+    (run_dir / "current_policy.md").write_text(current_policy, encoding="utf-8")
 
     print(f"[cycle {cycle}] run_dir={run_dir}", flush=True)
-    print(f"[cycle {cycle}] evaluation rows={len(eval_df)}", flush=True)
+    print(f"[cycle {cycle}] train rows={len(train_df)}, validation rows={len(validation_df)}", flush=True)
 
-    base_pred_df, base_metrics = evaluate_policy(eval_df, llm, config, current_policy, label="baseline")
-    save_predictions(run_dir / "baseline_predictions.csv", base_pred_df)
-    save_json(run_dir / "baseline_metrics.json", base_metrics)
-    append_hard_cases(config, base_pred_df)
+    train_pred_df, train_base_metrics = evaluate_policy(train_df, llm, config, current_policy, label="train-baseline")
+    save_predictions(run_dir / "train_baseline_predictions.csv", train_pred_df)
+    save_json(run_dir / "train_baseline_metrics.json", train_base_metrics)
+    append_hard_cases(config, train_pred_df)
 
-    error_clusters = build_error_clusters(base_pred_df)
+    error_clusters = build_error_clusters(train_pred_df)
     save_json(run_dir / "error_clusters.json", error_clusters)
     print(f"[cycle {cycle}] error_clusters={len(error_clusters)}", flush=True)
 
     candidate_count = config.getint("policy", "candidate_count", fallback=3)
     print(f"[cycle {cycle}] generating candidates: count={candidate_count}", flush=True)
-    candidates = generate_candidate_policies(llm, current_policy, error_clusters, candidate_count)
+    candidates = generate_candidate_policies(llm, current_policy, error_clusters, candidate_count, config=config)
     save_json(run_dir / "candidate_manifest.json", candidates)
     print(f"[cycle {cycle}] generated candidates={len(candidates)}", flush=True)
+
+    validation_base_pred_df, validation_base_metrics = evaluate_policy(
+        validation_df,
+        llm,
+        config,
+        current_policy,
+        label="validation-baseline",
+    )
+    save_predictions(run_dir / "validation_baseline_predictions.csv", validation_base_pred_df)
+    save_json(run_dir / "validation_baseline_metrics.json", validation_base_metrics)
 
     winner = {
         "name": "baseline",
         "policy_text": current_policy,
-        "metrics": base_metrics,
-        "predictions_path": str(run_dir / "baseline_predictions.csv"),
+        "metrics": validation_base_metrics,
+        "predictions_path": str(run_dir / "validation_baseline_predictions.csv"),
     }
     promoted = False
     promotion_reason = "no candidate promoted"
@@ -81,6 +92,19 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         (candidate_dir / "policy.md").write_text(policy_text, encoding="utf-8")
         (candidate_dir / "hypothesis.txt").write_text(candidate.get("hypothesis", ""), encoding="utf-8")
         (candidate_dir / "addendum.md").write_text(candidate.get("rendered_addendum", ""), encoding="utf-8")
+        (candidate_dir / "diagnosis.json").write_text(
+            json_dump(
+                {
+                    "target_error_cluster": candidate.get("target_error_cluster", ""),
+                    "policy_diagnosis": candidate.get("policy_diagnosis", ""),
+                    "why_wrong": candidate.get("why_wrong", ""),
+                    "why_correct_cases_remain_safe": candidate.get("why_correct_cases_remain_safe", ""),
+                    "regression_risk": candidate.get("regression_risk", ""),
+                    "hypothesis": candidate.get("hypothesis", ""),
+                }
+            ),
+            encoding="utf-8",
+        )
         (candidate_dir / "policy.diff").write_text(make_policy_diff(current_policy, policy_text), encoding="utf-8")
 
         valid_policy, validation_reason = validate_candidate_policy(current_policy, policy_text, config)
@@ -89,11 +113,11 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
             print(f"[candidate:{candidate['name']}] skipped: {validation_reason}", flush=True)
             continue
 
-        pred_df, metrics = evaluate_policy(eval_df, llm, config, policy_text, label=f"candidate:{candidate['name']}")
+        pred_df, metrics = evaluate_policy(validation_df, llm, config, policy_text, label=f"candidate:{candidate['name']}")
         save_predictions(candidate_dir / "predictions.csv", pred_df)
         save_json(candidate_dir / "metrics.json", metrics)
 
-        ok, reason = should_promote(base_metrics, metrics, config)
+        ok, reason = should_promote(validation_base_metrics, metrics, config)
         if ok and metrics.get("score", 0) > winner["metrics"].get("score", 0):
             winner = {
                 "name": candidate["name"],
@@ -116,7 +140,9 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         "started_at": started_at.strftime("%Y-%m-%d %H:%M:%S"),
         "ended_at": ended_at.strftime("%Y-%m-%d %H:%M:%S"),
         "elapsed_seconds": elapsed_seconds,
-        "base_metrics": base_metrics,
+        "train_base_metrics": train_base_metrics,
+        "base_metrics": validation_base_metrics,
+        "validation_base_metrics": validation_base_metrics,
         "winner_name": winner["name"],
         "winner_metrics": winner["metrics"],
         "promoted": promoted,
@@ -143,6 +169,12 @@ def sanitize_name(name: str) -> str:
         else:
             keep.append("_")
     return "".join(keep)[:80] or "candidate"
+
+
+def json_dump(value: Any) -> str:
+    import json
+
+    return json.dumps(value, ensure_ascii=False, indent=2)
 
 
 def format_elapsed(seconds: float) -> str:

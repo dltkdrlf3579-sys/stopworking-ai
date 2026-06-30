@@ -115,7 +115,7 @@ def compute_metrics(pred_df: pd.DataFrame) -> dict:
     if not isinstance(excluded, pd.Series):
         excluded = pd.Series([bool(excluded)] * len(pred_df), index=pred_df.index)
 
-    eval_df = pred_df[~excluded.fillna(False).astype(bool)].copy()
+    eval_df = pred_df[~excluded.map(normalize_bool)].copy()
     excluded_n = int(len(pred_df) - len(eval_df))
 
     if eval_df.empty:
@@ -195,6 +195,26 @@ def safe_div(num: int | float, den: int | float) -> float:
     if den == 0:
         return 0.0
     return float(num / den)
+
+
+def normalize_bool(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        is_missing = pd.isna(value)
+    except Exception:
+        is_missing = False
+    if isinstance(is_missing, bool) and is_missing:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y"}:
+            return True
+        if text in {"false", "0", "no", "n", ""}:
+            return False
+    return bool(value)
 
 
 def format_elapsed(seconds: float) -> str:

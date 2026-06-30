@@ -24,6 +24,8 @@ def build_policy_with_addendum(current_policy: str, addendum_title: str, addendu
     text = addendum_text.strip()
     if not text:
         raise ValueError("candidate addendum is empty")
+    if text in current_policy:
+        raise ValueError("candidate addendum duplicates existing policy text")
 
     addendum_lines = [line.rstrip() for line in text.splitlines() if line.strip()]
     if len(addendum_lines) > max_lines:
@@ -38,7 +40,7 @@ def build_policy_with_addendum(current_policy: str, addendum_title: str, addendu
             "",
             "",
             f"[추가 보정 규칙: {title}]",
-            "- 아래 규칙은 기존 정책 적용 시 반복된 오답 군집을 보완하기 위한 추가 판단 기준이며, 기존 정책을 대체하지 않는다.",
+            "- 아래 규칙은 기존 정책에 따라 판정했을 때 반복된 오답 군집을 보완하기 위한 추가 판단 기준이며, 기존 정책을 대체하지 않는다.",
             text,
         ]
     ).rstrip()
@@ -48,20 +50,34 @@ def build_policy_with_addendum(current_policy: str, addendum_title: str, addendu
 
 def should_promote(base_metrics: dict, candidate_metrics: dict, config: Any) -> tuple[bool, str]:
     min_gain = config.getfloat("policy", "promotion_min_score_gain", fallback=0.01)
+    min_accuracy_gain = config.getfloat("policy", "promotion_min_accuracy_gain", fallback=0.0)
     max_fn_regression = config.getint("policy", "promotion_max_fn_regression", fallback=0)
     max_fp_regression = config.getint("policy", "promotion_max_fp_regression", fallback=5)
+    max_excluded_regression = config.getint("policy", "promotion_max_excluded_regression", fallback=0)
 
     score_gain = candidate_metrics.get("score", 0) - base_metrics.get("score", 0)
+    accuracy_gain = candidate_metrics.get("accuracy", 0) - base_metrics.get("accuracy", 0)
     fn_regression = candidate_metrics.get("fn_true_as_false", 0) - base_metrics.get("fn_true_as_false", 0)
     fp_regression = candidate_metrics.get("fp_false_as_true", 0) - base_metrics.get("fp_false_as_true", 0)
+    excluded_regression = candidate_metrics.get("excluded_n", 0) - base_metrics.get("excluded_n", 0)
 
     if score_gain < min_gain:
         return False, f"score_gain {score_gain:.4f} < {min_gain:.4f}"
+    if accuracy_gain < min_accuracy_gain:
+        return False, f"accuracy_gain {accuracy_gain:.4f} < {min_accuracy_gain:.4f}"
     if fn_regression > max_fn_regression:
         return False, f"FN regression {fn_regression} > {max_fn_regression}"
     if fp_regression > max_fp_regression:
         return False, f"FP regression {fp_regression} > {max_fp_regression}"
-    return True, f"promoted: score_gain={score_gain:.4f}, fn_regression={fn_regression}, fp_regression={fp_regression}"
+    if excluded_regression > max_excluded_regression:
+        return False, f"excluded regression {excluded_regression} > {max_excluded_regression}"
+    return (
+        True,
+        "promoted: "
+        f"score_gain={score_gain:.4f}, accuracy_gain={accuracy_gain:.4f}, "
+        f"fn_regression={fn_regression}, fp_regression={fp_regression}, "
+        f"excluded_regression={excluded_regression}",
+    )
 
 
 def validate_candidate_policy(current_policy: str, candidate_policy: str, config: Any) -> tuple[bool, str]:
