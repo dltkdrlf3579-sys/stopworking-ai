@@ -12,6 +12,14 @@ def build_eval_df(df: pd.DataFrame, config: Any, cycle: int = 1) -> pd.DataFrame
 
 
 def build_train_validation_dfs(df: pd.DataFrame, config: Any, cycle: int = 1) -> tuple[pd.DataFrame, pd.DataFrame]:
+    original_len = len(df)
+    df = filter_labeled_rows(df, config)
+    dropped = original_len - len(df)
+    if dropped:
+        print(f"[sampling] dropped unlabeled rows for evaluation: {dropped}", flush=True)
+    if df.empty:
+        raise ValueError("정답 라벨이 있는 평가 대상 행이 없습니다. main.py 개선 루프는 정답_판단결과가 있는 데이터만 사용할 수 있습니다.")
+
     batch_size = config.getint("runtime", "batch_size", fallback=2000)
     validation_size = config.getint("runtime", "validation_size", fallback=batch_size)
     base_seed = config.getint("sampling", "random_seed", fallback=42)
@@ -90,6 +98,14 @@ def stratified_sample(df: pd.DataFrame, n: int, seed: int = 42) -> pd.DataFrame:
     return sampled.reset_index(drop=True)
 
 
+def filter_labeled_rows(df: pd.DataFrame, config: Any) -> pd.DataFrame:
+    label_col = get_label_col(config)
+    if label_col not in df.columns:
+        return df.copy()
+    labels = df[label_col].map(normalize_label_text)
+    return df[labels.isin({"진성", "가성"})].copy()
+
+
 def load_hard_rows_from_source(df: pd.DataFrame, hard_path: Path, id_col: str, limit: int, seed: int) -> pd.DataFrame:
     if limit <= 0 or not hard_path.exists() or id_col not in df.columns:
         return df.head(0).copy()
@@ -145,6 +161,31 @@ def get_id_col(config: Any) -> str:
         return config["columns"].get("id", "출원번호")
     except Exception:
         return "출원번호"
+
+
+def get_label_col(config: Any) -> str:
+    try:
+        return config["columns"].get("label", "정답_판단결과")
+    except Exception:
+        return "정답_판단결과"
+
+
+def normalize_label_text(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null", "nan"}:
+        return ""
+    if "진" in text:
+        return "진성"
+    if "가" in text:
+        return "가성"
+    return text
 
 
 def normalize_bool(value: object) -> bool:
