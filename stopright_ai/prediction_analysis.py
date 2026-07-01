@@ -72,8 +72,9 @@ def analyze_prediction_outputs(
     samples_per_cluster: int = 5,
     policy_path: str | Path | None = "policies/current_policy.md",
     max_policy_chars: int = 30000,
+    include_candidates: bool = False,
 ) -> dict[str, Path]:
-    files = discover_prediction_files(inputs)
+    files = discover_prediction_files(inputs, include_candidates=include_candidates)
     if not files:
         raise FileNotFoundError("No prediction CSV/XLSX files found.")
 
@@ -94,6 +95,7 @@ def analyze_prediction_outputs(
     recurring_df = build_recurring_errors(errors)
     representatives_df = build_representative_errors(cluster_payloads)
     metrics = compute_overall_metrics(normalized, eligible, errors, files)
+    metrics["include_candidates"] = bool(include_candidates)
     policy_text = load_policy_text(policy_path, max_policy_chars=max_policy_chars)
     llm_brief = build_llm_brief(metrics, cluster_payloads, policy_text, policy_path)
 
@@ -122,27 +124,29 @@ def analyze_prediction_outputs(
     return paths
 
 
-def discover_prediction_files(inputs: list[str | Path]) -> list[Path]:
+def discover_prediction_files(inputs: list[str | Path], include_candidates: bool = False) -> list[Path]:
     found: list[Path] = []
     for item in inputs:
         path = Path(item)
-        if path.is_file() and is_prediction_file(path):
+        if path.is_file() and is_prediction_file(path, include_candidates=include_candidates):
             found.append(path)
         elif path.is_dir():
             for child in path.rglob("*"):
-                if child.is_file() and is_prediction_file(child):
+                if child.is_file() and is_prediction_file(child, include_candidates=include_candidates):
                     found.append(child)
 
     return sorted(set(found), key=lambda p: str(p).lower())
 
 
-def is_prediction_file(path: Path) -> bool:
+def is_prediction_file(path: Path, include_candidates: bool = False) -> bool:
     name = path.name.lower()
     if name in GENERATED_NAMES:
         return False
     if path.suffix.lower() not in {".csv", ".xlsx", ".xls"}:
         return False
-    return name == "predictions.csv" or "prediction" in name
+    if name == "predictions.csv":
+        return include_candidates
+    return "prediction" in name
 
 
 def load_prediction_files(files: list[Path]) -> pd.DataFrame:
@@ -583,6 +587,7 @@ def build_markdown_report(metrics: dict, clusters_df: pd.DataFrame, recurring_df
         f"- Accuracy: {metrics['accuracy']:.4f}",
         f"- FN true-as-false: {metrics['fn_true_as_false']} ({metrics['fn_rate_among_true']:.4f})",
         f"- FP false-as-true: {metrics['fp_false_as_true']} ({metrics['fp_rate_among_false']:.4f})",
+        f"- Candidate predictions included: {metrics.get('include_candidates', False)}",
         "",
         "## Output Files",
     ]
@@ -707,6 +712,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--samples-per-cluster", type=int, default=5)
     parser.add_argument("--policy-path", default="policies/current_policy.md", help="Current policy/prompt file to include in the LLM analysis prompt.")
     parser.add_argument("--max-policy-chars", type=int, default=30000, help="Maximum policy characters included in the LLM brief.")
+    parser.add_argument(
+        "--include-candidates",
+        action="store_true",
+        help="Also include candidate-folder predictions.csv files. Default analyzes baseline/current-policy prediction files only.",
+    )
     args = parser.parse_args(argv)
 
     inputs = args.inputs or ["outputs"]
@@ -717,6 +727,7 @@ def main(argv: list[str] | None = None) -> None:
         samples_per_cluster=args.samples_per_cluster,
         policy_path=args.policy_path,
         max_policy_chars=args.max_policy_chars,
+        include_candidates=args.include_candidates,
     )
     print("[prediction-analysis] done")
     for name, path in paths.items():
