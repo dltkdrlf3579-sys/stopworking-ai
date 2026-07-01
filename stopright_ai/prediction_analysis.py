@@ -92,6 +92,8 @@ def analyze_prediction_outputs(
         max_clusters=max_clusters,
         samples_per_cluster=samples_per_cluster,
     )
+    fn_clusters_df = filter_clusters(clusters_df, "FN_true_as_false")
+    fp_clusters_df = filter_clusters(clusters_df, "FP_false_as_true")
     recurring_df = build_recurring_errors(errors)
     representatives_df = build_representative_errors(cluster_payloads)
     metrics = compute_overall_metrics(normalized, eligible, errors, files)
@@ -103,6 +105,8 @@ def analyze_prediction_outputs(
         "combined_predictions": out_dir / "combined_predictions.csv",
         "error_cases": out_dir / "error_cases.csv",
         "error_clusters": out_dir / "error_clusters.csv",
+        "fn_clusters": out_dir / "fn_clusters.csv",
+        "fp_clusters": out_dir / "fp_clusters.csv",
         "representative_errors": out_dir / "representative_errors.csv",
         "recurring_errors": out_dir / "recurring_errors.csv",
         "llm_cluster_brief": out_dir / "llm_cluster_brief.json",
@@ -114,6 +118,8 @@ def analyze_prediction_outputs(
     normalized.to_csv(paths["combined_predictions"], index=False, encoding="utf-8-sig")
     errors.to_csv(paths["error_cases"], index=False, encoding="utf-8-sig")
     clusters_df.to_csv(paths["error_clusters"], index=False, encoding="utf-8-sig")
+    fn_clusters_df.to_csv(paths["fn_clusters"], index=False, encoding="utf-8-sig")
+    fp_clusters_df.to_csv(paths["fp_clusters"], index=False, encoding="utf-8-sig")
     representatives_df.to_csv(paths["representative_errors"], index=False, encoding="utf-8-sig")
     recurring_df.to_csv(paths["recurring_errors"], index=False, encoding="utf-8-sig")
     paths["llm_cluster_brief"].write_text(json.dumps(llm_brief, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -410,6 +416,12 @@ def build_error_cluster_outputs(
     return pd.DataFrame(clusters), payloads
 
 
+def filter_clusters(clusters_df: pd.DataFrame, error_type: str) -> pd.DataFrame:
+    if clusters_df.empty or "error_type" not in clusters_df.columns:
+        return pd.DataFrame()
+    return clusters_df[clusters_df["error_type"] == error_type].copy()
+
+
 def select_representative_rows(group: pd.DataFrame, limit: int) -> pd.DataFrame:
     if group.empty:
         return group
@@ -502,6 +514,11 @@ def compute_overall_metrics(normalized: pd.DataFrame, eligible: pd.DataFrame, er
     tn = int(((labels == GA) & (preds == GA)).sum())
     eligible_n = int(len(eligible))
     accuracy = float((eligible["correct_norm"] == True).mean()) if eligible_n else 0.0
+    true_total = tp + fn
+    false_total = tn + fp
+    target_true_recall = 0.80
+    true_tp_needed_for_80 = int(math.ceil(true_total * target_true_recall)) if true_total else 0
+    additional_true_tp_needed_for_80 = max(0, true_tp_needed_for_80 - tp)
 
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -513,12 +530,21 @@ def compute_overall_metrics(normalized: pd.DataFrame, eligible: pd.DataFrame, er
         "unique_ids": int(normalized["id"].astype(str).nunique()) if "id" in normalized else int(len(normalized)),
         "error_rows": int(len(errors)),
         "accuracy": round(accuracy, 6),
+        "true_total": true_total,
+        "false_total": false_total,
         "tp_true": tp,
         "fn_true_as_false": fn,
         "fp_false_as_true": fp,
         "tn_false": tn,
+        "true_recall": round(safe_div(tp, true_total), 6),
+        "true_precision": round(safe_div(tp, tp + fp), 6),
+        "false_recall": round(safe_div(tn, false_total), 6),
+        "false_precision": round(safe_div(tn, tn + fn), 6),
         "fn_rate_among_true": round(safe_div(fn, tp + fn), 6),
         "fp_rate_among_false": round(safe_div(fp, tn + fp), 6),
+        "target_true_recall": target_true_recall,
+        "true_tp_needed_for_80_recall": true_tp_needed_for_80,
+        "additional_true_tp_needed_for_80_recall": additional_true_tp_needed_for_80,
     }
 
 
@@ -585,8 +611,13 @@ def build_markdown_report(metrics: dict, clusters_df: pd.DataFrame, recurring_df
         f"- Unique IDs: {metrics['unique_ids']}",
         f"- Error rows: {metrics['error_rows']}",
         f"- Accuracy: {metrics['accuracy']:.4f}",
+        f"- True recall: {metrics.get('true_recall', 0):.4f}",
+        f"- True precision: {metrics.get('true_precision', 0):.4f}",
+        f"- False recall: {metrics.get('false_recall', 0):.4f}",
+        f"- False precision: {metrics.get('false_precision', 0):.4f}",
         f"- FN true-as-false: {metrics['fn_true_as_false']} ({metrics['fn_rate_among_true']:.4f})",
         f"- FP false-as-true: {metrics['fp_false_as_true']} ({metrics['fp_rate_among_false']:.4f})",
+        f"- Additional TP needed for true recall 80%: {metrics.get('additional_true_tp_needed_for_80_recall', 0)}",
         f"- Candidate predictions included: {metrics.get('include_candidates', False)}",
         "",
         "## Output Files",
@@ -596,6 +627,15 @@ def build_markdown_report(metrics: dict, clusters_df: pd.DataFrame, recurring_df
 
     lines.extend(["", "## Top Error Clusters", ""])
     lines.extend(markdown_table(clusters_df.head(20), ["error_type", "keyword_bucket_label", "major", "count", "avg_confidence", "visual_evidence_rows", "top_terms"]))
+
+    fn_clusters = filter_clusters(clusters_df, "FN_true_as_false")
+    fp_clusters = filter_clusters(clusters_df, "FP_false_as_true")
+
+    lines.extend(["", "## FN Clusters To Improve True Recall", ""])
+    lines.extend(markdown_table(fn_clusters.head(15), ["keyword_bucket_label", "major", "count", "avg_confidence", "visual_evidence_rows", "top_terms"]))
+
+    lines.extend(["", "## FP Clusters To Guard Accuracy", ""])
+    lines.extend(markdown_table(fp_clusters.head(15), ["keyword_bucket_label", "major", "count", "avg_confidence", "visual_evidence_rows", "top_terms"]))
 
     lines.extend(["", "## Recurring Error IDs", ""])
     lines.extend(markdown_table(recurring_df.head(20), ["id", "error_count", "source_count", "error_types", "majors", "keyword_buckets", "max_confidence", "title"]))
