@@ -20,6 +20,14 @@ GENERATED_NAMES = {
     "combined_predictions.csv",
     "error_cases.csv",
     "error_clusters.csv",
+    "pipe_support_correct_false.csv",
+    "pipe_support_correct_true.csv",
+    "pipe_support_contrast_clusters.csv",
+    "pipe_support_errors.csv",
+    "pipe_support_focus.csv",
+    "pipe_support_fp.csv",
+    "pipe_support_fn.csv",
+    "pipe_support_representatives.csv",
     "representative_errors.csv",
     "recurring_errors.csv",
 }
@@ -39,6 +47,86 @@ KEYWORD_GROUPS = [
     ("process_parameter", ["\uc555\ub825", "\uc628\ub3c4", "\uc54c\ub78c", "\uc778\ud130\ub85d", "\uac10\uc555", "\ub0c9\uac01"]),
     ("housekeeping", ["\uc815\ub9ac\uc815\ub3c8", "\ud1b5\ub85c", "\uccad\uc18c", "\uc801\uce58"]),
     ("weather", ["\uc6b0\ucc9c", "\uac15\ud48d", "\ud3ed\uc5fc", "\uacb0\ube59", "\uc801\uc124", "\uae30\uc0c1"]),
+]
+
+PIPE_SUPPORT_CORE_KEYWORDS = [
+    "\ubc30\uad00",
+    "\uc11c\ud3ec\ud2b8",
+    "\uc815\uc81c\uc9c8\uc18c",
+    "\ucf00\ubbf8\uceec",
+    "\ub355\ud2b8",
+    "\ud2b8\ub808\uc774",
+    "\uc124\ube44 \ud504\ub808\uc784",
+    "\ubc1f",
+    "\ubc1f\uc74c",
+]
+
+PIPE_SUPPORT_CONTEXT_KEYWORDS = [
+    "\ubc1c\ud310",
+    "\uc0ac\ub2e4\ub9ac",
+    "\ube44\uacc4",
+    "\ub09c\uac04",
+    "\uac1c\uad6c\ubd80",
+    "\uace0\uc18c",
+    "\ucd94\ub77d",
+    "\ub099\ud558",
+    "\uacf5\uac04",
+    "\ud611\uc18c",
+    "\uac04\uc12d",
+    "\ub3d9\uc120",
+    "\ud1b5\ub85c",
+    "\uc811\ucd09",
+    "\ud30c\uc190",
+    "\ub204\ucd9c",
+    "\ud611\uc758",
+    "\uc124\uce58",
+]
+
+PIPE_SUPPORT_TRUE_CLUES = [
+    "\ubc1f\uc544\uc57c",
+    "\ubc1f\uc74c \ud544\uc694",
+    "\ubc1f\uace0",
+    "\ubc1f\uc73c\uba70",
+    "\ubc1c\ud310 \ubd80\uc871",
+    "\uc774\ub3d9\uacbd\ub85c \ubd80\uc871",
+    "\uacf5\uac04 \ud611\uc18c",
+    "\ud611\uc18c",
+    "\uac04\uc12d",
+    "\ubd80\uc11c \ud611\uc758",
+    "\uc2dc\uacf5\uadf8\ub8f9",
+    "\uc791\uc5c5\ubc29\ubc95 \ubcc0\uacbd",
+    "\uc784\uc2dc\ubc1c\ud310",
+    "\ube44\uacc4",
+    "\ub09c\uac04",
+    "\ub36e\uac1c",
+    "\uc124\ube44 \ubcf4\ud638",
+    "\ucd94\ub77d",
+    "\ub099\ud558",
+    "\ub204\ucd9c",
+    "\ud30c\uc190",
+    "\uc811\ucd09",
+]
+
+PIPE_SUPPORT_FALSE_CLUES = [
+    "\uc791\uc5c5\uc608\uc815",
+    "\uc791\uc5c5 \uc608\uc815",
+    "\ud604\uc7a5\ud655\uc778 \uc2dc",
+    "\uc0ac\uc804",
+    "\uc0ac\uc804\uc810\uac80",
+    "\uc791\uc5c5\uc804",
+    "DRI",
+    "\uacc4\ud68d",
+    "\uc77c\uc815 \uc870\uc728",
+    "\ud5c8\uac00",
+    "\uc11c\ub958",
+    "\uad50\uc721",
+    "\uc7ac\uccb4\uacb0",
+    "\uad50\uccb4",
+    "\uc815\ub9ac\uc815\ub3c8",
+    "\ud1b5\ub85c\ud655\ubcf4",
+    "\uc790\uc7ac \uc774\ub3d9",
+    "\uc704\uce58 \ubcc0\uacbd",
+    "\ub2e8\uc21c",
 ]
 
 STOPWORDS = {
@@ -100,6 +188,12 @@ def analyze_prediction_outputs(
     metrics["include_candidates"] = bool(include_candidates)
     policy_text = load_policy_text(policy_path, max_policy_chars=max_policy_chars)
     llm_brief = build_llm_brief(metrics, cluster_payloads, policy_text, policy_path)
+    pipe_support_bundle = build_pipe_support_focus_bundle(
+        eligible,
+        samples_per_group=samples_per_cluster,
+        policy_text=policy_text,
+        policy_path=policy_path,
+    )
 
     paths = {
         "combined_predictions": out_dir / "combined_predictions.csv",
@@ -112,6 +206,16 @@ def analyze_prediction_outputs(
         "llm_cluster_brief": out_dir / "llm_cluster_brief.json",
         "llm_analysis_prompt": out_dir / "llm_analysis_prompt.md",
         "policy_snapshot": out_dir / "policy_snapshot.md",
+        "pipe_support_focus": out_dir / "pipe_support_focus.csv",
+        "pipe_support_errors": out_dir / "pipe_support_errors.csv",
+        "pipe_support_fn": out_dir / "pipe_support_fn.csv",
+        "pipe_support_fp": out_dir / "pipe_support_fp.csv",
+        "pipe_support_correct_true": out_dir / "pipe_support_correct_true.csv",
+        "pipe_support_correct_false": out_dir / "pipe_support_correct_false.csv",
+        "pipe_support_contrast_clusters": out_dir / "pipe_support_contrast_clusters.csv",
+        "pipe_support_representatives": out_dir / "pipe_support_representatives.csv",
+        "pipe_support_llm_prompt": out_dir / "pipe_support_llm_prompt.md",
+        "pipe_support_report": out_dir / "pipe_support_report.md",
         "report": out_dir / "error_analysis_report.md",
     }
 
@@ -125,6 +229,16 @@ def analyze_prediction_outputs(
     paths["llm_cluster_brief"].write_text(json.dumps(llm_brief, ensure_ascii=False, indent=2), encoding="utf-8")
     paths["llm_analysis_prompt"].write_text(build_llm_prompt(llm_brief), encoding="utf-8")
     paths["policy_snapshot"].write_text(policy_text or "Policy file not found or empty.", encoding="utf-8")
+    pipe_support_bundle["focus"].to_csv(paths["pipe_support_focus"], index=False, encoding="utf-8-sig")
+    pipe_support_bundle["errors"].to_csv(paths["pipe_support_errors"], index=False, encoding="utf-8-sig")
+    pipe_support_bundle["fn"].to_csv(paths["pipe_support_fn"], index=False, encoding="utf-8-sig")
+    pipe_support_bundle["fp"].to_csv(paths["pipe_support_fp"], index=False, encoding="utf-8-sig")
+    pipe_support_bundle["correct_true"].to_csv(paths["pipe_support_correct_true"], index=False, encoding="utf-8-sig")
+    pipe_support_bundle["correct_false"].to_csv(paths["pipe_support_correct_false"], index=False, encoding="utf-8-sig")
+    pipe_support_bundle["clusters"].to_csv(paths["pipe_support_contrast_clusters"], index=False, encoding="utf-8-sig")
+    pipe_support_bundle["representatives"].to_csv(paths["pipe_support_representatives"], index=False, encoding="utf-8-sig")
+    paths["pipe_support_llm_prompt"].write_text(pipe_support_bundle["llm_prompt"], encoding="utf-8")
+    paths["pipe_support_report"].write_text(build_pipe_support_report(pipe_support_bundle, paths), encoding="utf-8")
     paths["report"].write_text(build_markdown_report(metrics, clusters_df, recurring_df, paths), encoding="utf-8")
 
     return paths
@@ -199,7 +313,25 @@ def infer_source_stage(path: Path) -> str:
 
 def normalize_predictions(df: pd.DataFrame) -> pd.DataFrame:
     work = df.copy()
-    ensure_columns(work, ["id", "label", "pred", "correct", "confidence", "major", "middle", "title", "reason"])
+    ensure_columns(
+        work,
+        [
+            "id",
+            "label",
+            "pred",
+            "correct",
+            "confidence",
+            "major",
+            "middle",
+            "title",
+            "reason",
+            "source_order",
+            "source_path",
+            "source_file",
+            "source_stage",
+        ],
+    )
+    work["source_order"] = work["source_order"].map(parse_number)
 
     work["label_norm"] = work["label"].map(normalize_label)
     work["pred_norm"] = work["pred"].map(normalize_label)
@@ -209,6 +341,7 @@ def normalize_predictions(df: pd.DataFrame) -> pd.DataFrame:
     work["evidence_obj"] = series_or_default(work, "evidence", "").map(parse_structured)
     work["decisive_evidence_obj"] = series_or_default(work, "decisive_evidence", "").map(parse_structured)
     work["visual_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "visual_evidence"), 1200))
+    work["pipe_support_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "pipe_support_evidence"), 1200))
     work["key_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "key_evidence"), 1200))
     work["missing_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "missing_evidence"), 800))
     work["decisive_evidence_text"] = work["decisive_evidence_obj"].map(lambda value: compact_text(value, 1200))
@@ -314,6 +447,7 @@ def row_analysis_text(row: pd.Series) -> str:
         row.get("decisive_evidence_text", ""),
         row.get("key_evidence_text", ""),
         row.get("visual_evidence_text", ""),
+        row.get("pipe_support_evidence_text", ""),
         row.get("missing_evidence_text", ""),
         row.get("error", ""),
     ]
@@ -599,6 +733,353 @@ Return JSON with:
 """
 
 
+def build_pipe_support_focus_bundle(
+    eligible: pd.DataFrame,
+    samples_per_group: int,
+    policy_text: str = "",
+    policy_path: str | Path | None = None,
+) -> dict[str, Any]:
+    if eligible.empty:
+        focus = eligible.copy()
+    else:
+        focus = eligible[eligible.apply(is_pipe_support_focus_row, axis=1)].copy()
+
+    if not focus.empty:
+        focus["pipe_support_subtype"] = focus["analysis_text"].map(assign_pipe_support_subtype)
+        focus["pipe_support_true_clues"] = focus["analysis_text"].map(lambda text: ", ".join(matched_keywords(text, PIPE_SUPPORT_TRUE_CLUES, 12)))
+        focus["pipe_support_false_clues"] = focus["analysis_text"].map(lambda text: ", ".join(matched_keywords(text, PIPE_SUPPORT_FALSE_CLUES, 12)))
+    else:
+        focus["pipe_support_subtype"] = ""
+        focus["pipe_support_true_clues"] = ""
+        focus["pipe_support_false_clues"] = ""
+
+    errors = focus[focus["correct_norm"] == False].copy() if "correct_norm" in focus else pd.DataFrame()
+    fn = focus[focus["error_type"] == "FN_true_as_false"].copy() if "error_type" in focus else pd.DataFrame()
+    fp = focus[focus["error_type"] == "FP_false_as_true"].copy() if "error_type" in focus else pd.DataFrame()
+    correct_true = focus[(focus["correct_norm"] == True) & (focus["label_norm"] == JIN)].copy() if "label_norm" in focus else pd.DataFrame()
+    correct_false = focus[(focus["correct_norm"] == True) & (focus["label_norm"] == GA)].copy() if "label_norm" in focus else pd.DataFrame()
+    clusters = build_pipe_support_contrast_clusters(focus)
+    representatives = build_pipe_support_representatives(focus, samples_per_group)
+    metrics = compute_pipe_support_metrics(focus)
+    brief = {
+        "purpose": "Focused pipe/support stepping and path-interference error brief. Use this to improve true recall without broad FP increase.",
+        "current_policy_path": str(policy_path or ""),
+        "metrics": metrics,
+        "clusters": clusters.to_dict("records") if not clusters.empty else [],
+        "representative_samples": representatives.to_dict("records") if not representatives.empty else [],
+        "current_policy": policy_text,
+    }
+
+    return {
+        "metrics": metrics,
+        "focus": select_pipe_support_columns(focus),
+        "errors": select_pipe_support_columns(errors),
+        "fn": select_pipe_support_columns(fn),
+        "fp": select_pipe_support_columns(fp),
+        "correct_true": select_pipe_support_columns(correct_true),
+        "correct_false": select_pipe_support_columns(correct_false),
+        "clusters": clusters,
+        "representatives": representatives,
+        "llm_prompt": build_pipe_support_llm_prompt(brief),
+    }
+
+
+def is_pipe_support_focus_row(row: pd.Series) -> bool:
+    if safe_str(row.get("keyword_bucket", "")) == "pipe_step":
+        return True
+    text = safe_str(row.get("analysis_text", ""))
+    if not text.strip():
+        return False
+    core_hits = matched_keywords(text, PIPE_SUPPORT_CORE_KEYWORDS, 4)
+    context_hits = matched_keywords(text, PIPE_SUPPORT_CONTEXT_KEYWORDS, 4)
+    if core_hits and context_hits:
+        return True
+
+    height_access = matched_keywords(text, ["발판", "사다리", "비계", "난간", "개구부", "고소", "추락"], 3)
+    path_problem = matched_keywords(text, ["공간", "협소", "간섭", "동선", "통로", "밟"], 3)
+    return bool(height_access and path_problem)
+
+
+def assign_pipe_support_subtype(text: str) -> str:
+    if matched_keywords(text, ["밟", "밟음", "밟아야", "밟고"], 1) and matched_keywords(text, ["배관", "서포트", "정제질소", "케미컬", "덕트", "트레이"], 1):
+        return "forced_pipe_or_support_stepping"
+    if matched_keywords(text, ["누출", "접액", "냄새", "응축수", "DIW", "화학", "가스", "접촉"], 1):
+        return "pipe_leak_or_contact_uncertainty"
+    if matched_keywords(text, ["발판", "사다리", "비계", "난간", "개구부", "고소", "추락", "낙하"], 1):
+        return "height_or_access_fall"
+    if matched_keywords(text, ["공간", "협소", "간섭", "동선", "통로", "충돌", "끼임"], 1):
+        return "space_path_interference"
+    return "pipe_support_general"
+
+
+def matched_keywords(text: str, keywords: list[str], limit: int = 20) -> list[str]:
+    upper_text = safe_str(text).upper()
+    matches = []
+    for keyword in keywords:
+        if keyword.upper() in upper_text and keyword not in matches:
+            matches.append(keyword)
+        if len(matches) >= limit:
+            break
+    return matches
+
+
+def build_pipe_support_contrast_clusters(focus: pd.DataFrame) -> pd.DataFrame:
+    if focus.empty:
+        return pd.DataFrame()
+
+    rows = []
+    group_cols = ["error_type", "pipe_support_subtype", "major"]
+    grouped = focus.groupby(group_cols, dropna=False)
+    for key, group in sorted(grouped, key=lambda item: (error_sort_rank(item[0][0]), -len(item[1]))):
+        error_type, subtype, major = key
+        texts = list(group["analysis_text"].map(safe_str))
+        representatives = select_representative_rows(group, 4)
+        rows.append(
+            {
+                "error_type": safe_str(error_type),
+                "pipe_support_subtype": safe_str(subtype),
+                "major": safe_str(major),
+                "count": int(len(group)),
+                "unique_ids": int(group["id"].astype(str).nunique()) if "id" in group else int(len(group)),
+                "label_counts": value_counts_text(group.get("label_norm", pd.Series(dtype=str))),
+                "pred_counts": value_counts_text(group.get("pred_norm", pd.Series(dtype=str))),
+                "avg_confidence": round(float(group["confidence_num"].mean()), 2) if len(group) else 0,
+                "visual_evidence_rows": int(group["has_visual_evidence"].sum()) if "has_visual_evidence" in group else 0,
+                "true_clues": value_counts_from_csv(group.get("pipe_support_true_clues", pd.Series(dtype=str)), 10),
+                "false_clues": value_counts_from_csv(group.get("pipe_support_false_clues", pd.Series(dtype=str)), 10),
+                "top_terms": ", ".join(top_terms(texts, limit=12)),
+                "sample_ids": ", ".join(safe_str(row.get("id", "")) for row in representatives.to_dict("records")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_pipe_support_representatives(focus: pd.DataFrame, samples_per_group: int) -> pd.DataFrame:
+    if focus.empty:
+        return pd.DataFrame()
+
+    rows = []
+    group_cols = ["error_type", "pipe_support_subtype", "major"]
+    grouped = focus.groupby(group_cols, dropna=False)
+    for key, group in sorted(grouped, key=lambda item: (error_sort_rank(item[0][0]), -len(item[1])))[:40]:
+        error_type, subtype, major = key
+        representatives = select_representative_rows(group, samples_per_group)
+        for sample in representatives.to_dict("records"):
+            row = compact_pipe_support_sample(sample)
+            row["cluster_error_type"] = safe_str(error_type)
+            row["cluster_pipe_support_subtype"] = safe_str(subtype)
+            row["cluster_major"] = safe_str(major)
+            row["cluster_count"] = int(len(group))
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def compact_pipe_support_sample(row: dict) -> dict:
+    sample = compact_sample(row)
+    sample["pipe_support_subtype"] = safe_str(row.get("pipe_support_subtype", ""))
+    sample["pipe_support_true_clues"] = safe_str(row.get("pipe_support_true_clues", ""))
+    sample["pipe_support_false_clues"] = safe_str(row.get("pipe_support_false_clues", ""))
+    sample["pipe_support_evidence"] = compact_text(row.get("pipe_support_evidence_text", ""), 800)
+    return sample
+
+
+def select_pipe_support_columns(df: pd.DataFrame) -> pd.DataFrame:
+    preferred = [
+        "source_stage",
+        "source_file",
+        "id",
+        "title",
+        "major",
+        "middle",
+        "label_norm",
+        "pred_norm",
+        "correct_norm",
+        "error_type",
+        "confidence_num",
+        "pipe_support_subtype",
+        "pipe_support_true_clues",
+        "pipe_support_false_clues",
+        "reason",
+        "applied_step",
+        "decisive_evidence_text",
+        "key_evidence_text",
+        "visual_evidence_text",
+        "pipe_support_evidence_text",
+        "missing_evidence_text",
+        "top_terms_row",
+        "source_path",
+    ]
+    cols = [col for col in preferred if col in df.columns]
+    if not cols:
+        return pd.DataFrame(columns=preferred)
+    return df[cols].copy()
+
+
+def compute_pipe_support_metrics(focus: pd.DataFrame) -> dict:
+    if focus.empty:
+        return {
+            "focus_rows": 0,
+            "focus_errors": 0,
+            "focus_accuracy": 0.0,
+            "true_total": 0,
+            "false_total": 0,
+            "tp_true": 0,
+            "fn_true_as_false": 0,
+            "fp_false_as_true": 0,
+            "tn_false": 0,
+            "true_recall": 0.0,
+            "true_precision": 0.0,
+            "false_recall": 0.0,
+            "false_precision": 0.0,
+        }
+
+    labels = focus["label_norm"]
+    preds = focus["pred_norm"]
+    tp = int(((labels == JIN) & (preds == JIN)).sum())
+    fn = int(((labels == JIN) & (preds == GA)).sum())
+    fp = int(((labels == GA) & (preds == JIN)).sum())
+    tn = int(((labels == GA) & (preds == GA)).sum())
+    true_total = tp + fn
+    false_total = tn + fp
+    return {
+        "focus_rows": int(len(focus)),
+        "focus_errors": int((focus["correct_norm"] == False).sum()),
+        "focus_accuracy": round(float((focus["correct_norm"] == True).mean()), 6),
+        "true_total": true_total,
+        "false_total": false_total,
+        "tp_true": tp,
+        "fn_true_as_false": fn,
+        "fp_false_as_true": fp,
+        "tn_false": tn,
+        "true_recall": round(safe_div(tp, true_total), 6),
+        "true_precision": round(safe_div(tp, tp + fp), 6),
+        "false_recall": round(safe_div(tn, false_total), 6),
+        "false_precision": round(safe_div(tn, tn + fn), 6),
+    }
+
+
+def build_pipe_support_llm_prompt(brief: dict) -> str:
+    brief_text = json.dumps(brief, ensure_ascii=False, indent=2)
+    return f"""너는 작업중지권 진성/가성 분류 정책을 검토하는 안전관리 데이터 분석가다.
+
+아래 자료는 전체 오답이 아니라 `pipe/support stepping`, 배관/서포트 밟음, 발판·이동경로 부족, 공간 협소, 설비 간섭 관련 사례만 따로 모은 것이다.
+목표는 진성 recall을 올리는 것이지만, 같은 군집에서 FP도 같이 발생하므로 넓은 진성 규칙을 만들면 안 된다.
+
+반드시 다음 관점으로 분석하라.
+1. FN_true_as_false와 FP_false_as_true를 같은 subtype/대분류 안에서 비교한다.
+2. "배관", "발판", "협의", "공간", "추락" 같은 단어 자체가 아니라, 실제로 판정을 가르는 discriminator를 찾는다.
+3. discriminator는 작업중/작업개시직전, 안전한 발판 부재, 밟으면 안 되는 설비를 밟아야 하는 강제성, 물리적 보강 필요, 행정 협의인지 기술 협의인지, 사전점검인지 실제 노출 상태인지로 나눈다.
+4. `pipe/support` 전체를 진성으로 보내는 제안은 금지한다.
+5. 정책 변경이 필요하다면 1~2문장짜리 좁은 보강 규칙과, FP 방지 반례 조건을 함께 제안한다.
+6. 라벨 기준 자체가 흔들리는 영역이면 정책 변경 대신 "라벨 기준 확인 필요"로 분리한다.
+
+JSON만 출력하라.
+{{
+  "fn_fp_discriminators": [],
+  "high_value_narrow_rule": "",
+  "fp_guardrail": "",
+  "image_evidence_to_check": [],
+  "policy_change_risk": "",
+  "do_not_change": [],
+  "next_manual_review_targets": []
+}}
+
+[Pipe/Support Focus Brief]
+{brief_text}
+"""
+
+
+def build_pipe_support_report(bundle: dict[str, Any], paths: dict[str, Path]) -> str:
+    metrics = bundle["metrics"]
+    clusters = bundle["clusters"]
+    representatives = bundle["representatives"]
+    lines = [
+        "# Pipe/Support Focus Analysis",
+        "",
+        "This report isolates pipe/support stepping, foothold/path shortage, and equipment-interference cases.",
+        "",
+        "## Metrics",
+        "",
+        f"- Focus rows: {metrics.get('focus_rows', 0)}",
+        f"- Focus errors: {metrics.get('focus_errors', 0)}",
+        f"- Focus accuracy: {metrics.get('focus_accuracy', 0):.4f}",
+        f"- True recall in focus: {metrics.get('true_recall', 0):.4f}",
+        f"- True precision in focus: {metrics.get('true_precision', 0):.4f}",
+        f"- False recall in focus: {metrics.get('false_recall', 0):.4f}",
+        f"- FN true-as-false in focus: {metrics.get('fn_true_as_false', 0)}",
+        f"- FP false-as-true in focus: {metrics.get('fp_false_as_true', 0)}",
+        "",
+        "## Output Files",
+        "",
+    ]
+    for name in [
+        "pipe_support_focus",
+        "pipe_support_errors",
+        "pipe_support_fn",
+        "pipe_support_fp",
+        "pipe_support_correct_true",
+        "pipe_support_correct_false",
+        "pipe_support_contrast_clusters",
+        "pipe_support_representatives",
+        "pipe_support_llm_prompt",
+    ]:
+        if name in paths:
+            lines.append(f"- {name}: `{paths[name]}`")
+
+    lines.extend(["", "## FN To Improve True Recall", ""])
+    fn_clusters = clusters[clusters["error_type"] == "FN_true_as_false"] if not clusters.empty and "error_type" in clusters else pd.DataFrame()
+    lines.extend(markdown_table(fn_clusters.head(20), ["pipe_support_subtype", "major", "count", "avg_confidence", "visual_evidence_rows", "true_clues", "false_clues", "top_terms"]))
+
+    lines.extend(["", "## FP To Guard Accuracy", ""])
+    fp_clusters = clusters[clusters["error_type"] == "FP_false_as_true"] if not clusters.empty and "error_type" in clusters else pd.DataFrame()
+    lines.extend(markdown_table(fp_clusters.head(20), ["pipe_support_subtype", "major", "count", "avg_confidence", "visual_evidence_rows", "true_clues", "false_clues", "top_terms"]))
+
+    lines.extend(["", "## Correct True References", ""])
+    correct_true = clusters[(clusters["error_type"] == "CORRECT") & (clusters["label_counts"].str.contains(JIN, na=False))] if not clusters.empty and "label_counts" in clusters else pd.DataFrame()
+    lines.extend(markdown_table(correct_true.head(10), ["pipe_support_subtype", "major", "count", "avg_confidence", "true_clues", "false_clues", "top_terms"]))
+
+    lines.extend(["", "## Representative Samples", ""])
+    lines.extend(markdown_table(representatives.head(20), ["cluster_error_type", "cluster_pipe_support_subtype", "cluster_major", "id", "label", "pred", "confidence", "pipe_support_true_clues", "pipe_support_false_clues", "title"]))
+
+    lines.extend(
+        [
+            "",
+            "## How To Use",
+            "",
+            "1. Open `pipe_support_fn.csv` and `pipe_support_fp.csv` side by side.",
+            "2. Paste `pipe_support_llm_prompt.md` into the internal LLM for a focused diagnosis.",
+            "3. Only accept a new policy sentence if it catches repeated FN while clearly excluding the listed FP clusters.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def error_sort_rank(error_type: Any) -> int:
+    order = {
+        "FN_true_as_false": 0,
+        "FP_false_as_true": 1,
+        "CORRECT": 2,
+        "OTHER": 3,
+        "EXCLUDED": 4,
+    }
+    return order.get(safe_str(error_type), 9)
+
+
+def value_counts_text(series: pd.Series) -> str:
+    if series.empty:
+        return ""
+    counts = series.map(safe_str).value_counts(dropna=False)
+    return ", ".join(f"{idx}:{count}" for idx, count in counts.items() if safe_str(idx))
+
+
+def value_counts_from_csv(series: pd.Series, limit: int = 10) -> str:
+    counter: Counter[str] = Counter()
+    for value in series.map(safe_str):
+        for item in [part.strip() for part in value.split(",") if part.strip()]:
+            counter[item] += 1
+    return ", ".join(term for term, _ in counter.most_common(limit))
+
+
 def build_markdown_report(metrics: dict, clusters_df: pd.DataFrame, recurring_df: pd.DataFrame, paths: dict[str, Path]) -> str:
     lines = [
         "# Prediction Error Analysis",
@@ -680,6 +1161,7 @@ def compact_sample(row: dict) -> dict:
         "decisive_evidence": compact_text(row.get("decisive_evidence_text", ""), 700),
         "key_evidence": compact_text(row.get("key_evidence_text", ""), 700),
         "visual_evidence": compact_text(row.get("visual_evidence_text", ""), 700),
+        "pipe_support_evidence": compact_text(row.get("pipe_support_evidence_text", ""), 700),
         "top_terms": safe_str(row.get("top_terms_row", "")),
     }
 

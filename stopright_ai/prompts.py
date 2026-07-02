@@ -4,6 +4,8 @@ from __future__ import annotations
 EVIDENCE_SYSTEM = """너는 작업중지권 진성/가성 판단을 위한 사건 증거 추출기다.
 결론을 먼저 내리지 말고, 입력 사건에서 판정에 필요한 증거만 구조화한다.
 이미지가 제공되면 이미지에서 직접 관찰 가능한 위험, 설비 상태, 작업 상태를 확인해 시각 근거로 분리한다.
+특히 배관, 서포트, 발판, 사다리, 비계, 난간, 개구부, 공간 협소, 동선 간섭 사례는 안전한 발판·이동경로 유무와 밟으면 안 되는 설비 접촉 여부를 자세히 관찰한다.
+이미지에서 보이는 사실과 텍스트에만 있는 사실을 구분하고, 보이지 않는 부분은 확인불가로 둔다.
 이미지에 보이지 않는 위험은 이미지 근거처럼 쓰지 않는다.
 반드시 JSON 하나만 출력한다."""
 
@@ -33,7 +35,7 @@ def evidence_user(case: dict) -> str:
   "normalized_summary": "사건 요약",
   "work_timing": "작업전|작업중|작업후|불명",
   "physical_risk": "있음|없음|불명",
-  "risk_type": ["낙하", "협착", "감전", "화재", "폭발", "붕괴", "유해가스", "전도", "기타"],
+  "risk_type": ["추락", "낙하", "끼임", "충돌", "협착", "감전", "화재", "폭발", "누출", "붕괴", "유해가스", "화학물질노출", "전도", "기타"],
   "unexpected_emergency": "있음|없음|불명",
   "imminent_severe_accident": "있음|없음|불명",
   "controlled_by_standard_rules": "가능|불가능|불명",
@@ -41,6 +43,14 @@ def evidence_user(case: dict) -> str:
   "false_positive_signals": ["작업전점검", "일상수칙위반", "행정절차", "계획정비", "자체시정", "긴급성부족"],
   "key_evidence": ["핵심 근거 문장 또는 관찰"],
   "visual_evidence": ["이미지에서 직접 확인한 위험 또는 상태. 이미지 입력이 없거나 확인 불가하면 빈 배열"],
+  "pipe_support_evidence": {{
+    "safe_foothold_or_path": "안전한 발판·이동경로가 보이는지. 확인불가면 확인불가",
+    "pipe_or_support_stepping": "배관·서포트·설비 프레임을 밟거나 밟아야 하는 정황이 보이는지. 확인불가면 확인불가",
+    "work_height_or_fall_context": "고소·개구부·난간·사다리·비계·추락 관련 시각 정황",
+    "interference_or_contact_context": "공간 협소, 동선 간섭, 끼임·충돌·접촉·설비 파손 가능 시각 정황",
+    "needed_physical_controls": ["이미지나 텍스트상 필요해 보이는 물리적 조치: 임시발판, 비계, 난간, 덮개, 작업방법 변경, 부서 협의 등"],
+    "visual_uncertainty": ["이미지만으로 확인 불가하거나 추가 확인이 필요한 사항"]
+  }},
   "missing_evidence": ["부족한 증거"],
   "image_evidence_needed": true
 }}
