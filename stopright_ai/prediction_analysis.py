@@ -20,6 +20,14 @@ GENERATED_NAMES = {
     "combined_predictions.csv",
     "error_cases.csv",
     "error_clusters.csv",
+    "leak_contact_correct_false.csv",
+    "leak_contact_correct_true.csv",
+    "leak_contact_contrast_clusters.csv",
+    "leak_contact_errors.csv",
+    "leak_contact_focus.csv",
+    "leak_contact_fp.csv",
+    "leak_contact_fn.csv",
+    "leak_contact_representatives.csv",
     "pipe_support_correct_false.csv",
     "pipe_support_correct_true.csv",
     "pipe_support_contrast_clusters.csv",
@@ -129,6 +137,88 @@ PIPE_SUPPORT_FALSE_CLUES = [
     "\ub2e8\uc21c",
 ]
 
+LEAK_CONTACT_CORE_KEYWORDS = [
+    "\ub204\ucd9c",
+    "\uc811\ucd09",
+    "\uc811\uc561",
+    "\ud761\uc785",
+    "\ub0c4\uc0c8",
+    "\uc561\uccb4",
+    "\ubbf8\uc0c1",
+    "\uc751\ucd95\uc218",
+    "DIW",
+    "\uc57d\ud488",
+    "\ud654\ud559",
+    "\ud3d0\uc561",
+    "\uac00\uc2a4",
+    "\uc5f0\uae30",
+    "\ubd84\uc9c4",
+]
+
+LEAK_CONTACT_CONTEXT_KEYWORDS = [
+    "\ubc30\uad00",
+    "\ubc38\ube0c",
+    "\ud38c\ud504",
+    "PUMP",
+    "\uc7a5\ube44",
+    "\uc124\ube44",
+    "\ud558\ubd80",
+    "\ucc28\ub2e8",
+    "\uaca9\ub9ac",
+    "\ubc29\uc81c",
+    "\ud658\uae30",
+    "\uac00\uc2a4\uce21\uc815",
+    "\uc131\ubd84",
+    "\ud655\uc778",
+    "\uc6d0\uc778",
+    "\ud654\uc7ac",
+    "\ud3ed\ubc1c",
+    "\uc9c8\uc2dd",
+    "\uac10\uc804",
+]
+
+LEAK_CONTACT_TRUE_CLUES = [
+    "\ubbf8\uc0c1 \uc561\uccb4",
+    "\uc131\ubd84 \ubbf8\uc0c1",
+    "\ub204\ucd9c\uc6d0 \ud655\uc778",
+    "\uc131\ubd84 \ud655\uc778",
+    "\ucc28\ub2e8",
+    "\uaca9\ub9ac",
+    "\ubc29\uc81c",
+    "\ud658\uae30",
+    "\uac00\uc2a4\uce21\uc815",
+    "\uc811\uc561",
+    "\ud761\uc785",
+    "\ub0c4\uc0c8",
+    "\uac00\uc2a4",
+    "\ud654\uc7ac",
+    "\ud3ed\ubc1c",
+    "\uc9c8\uc2dd",
+    "\uc791\uc5c5\uc790 \ub178\ucd9c",
+    "\uc2e0\uace0",
+    "ERT",
+]
+
+LEAK_CONTACT_FALSE_CLUES = [
+    "\uc751\ucd95\uc218",
+    "DIW",
+    "\ubb3c",
+    "\ubb34\ud574",
+    "\ub2e6",
+    "\uccad\uc18c",
+    "\ubc30\uc218",
+    "\uad50\uccb4",
+    "\uc7ac\uccb4\uacb0",
+    "\uc18c\ub7c9",
+    "\uacbd\ubbf8",
+    "\uad00\ub9ac\uae30\uc900 \uc774\ub0b4",
+    "\uc608\uc815\ub41c",
+    "\uacc4\ud68d",
+    "\uc0ac\uc804",
+    "\uc791\uc5c5\uc804",
+    "\ub2e8\uc21c",
+]
+
 STOPWORDS = {
     "true",
     "false",
@@ -194,6 +284,12 @@ def analyze_prediction_outputs(
         policy_text=policy_text,
         policy_path=policy_path,
     )
+    leak_contact_bundle = build_leak_contact_focus_bundle(
+        eligible,
+        samples_per_group=samples_per_cluster,
+        policy_text=policy_text,
+        policy_path=policy_path,
+    )
 
     paths = {
         "combined_predictions": out_dir / "combined_predictions.csv",
@@ -216,6 +312,16 @@ def analyze_prediction_outputs(
         "pipe_support_representatives": out_dir / "pipe_support_representatives.csv",
         "pipe_support_llm_prompt": out_dir / "pipe_support_llm_prompt.md",
         "pipe_support_report": out_dir / "pipe_support_report.md",
+        "leak_contact_focus": out_dir / "leak_contact_focus.csv",
+        "leak_contact_errors": out_dir / "leak_contact_errors.csv",
+        "leak_contact_fn": out_dir / "leak_contact_fn.csv",
+        "leak_contact_fp": out_dir / "leak_contact_fp.csv",
+        "leak_contact_correct_true": out_dir / "leak_contact_correct_true.csv",
+        "leak_contact_correct_false": out_dir / "leak_contact_correct_false.csv",
+        "leak_contact_contrast_clusters": out_dir / "leak_contact_contrast_clusters.csv",
+        "leak_contact_representatives": out_dir / "leak_contact_representatives.csv",
+        "leak_contact_llm_prompt": out_dir / "leak_contact_llm_prompt.md",
+        "leak_contact_report": out_dir / "leak_contact_report.md",
         "report": out_dir / "error_analysis_report.md",
     }
 
@@ -239,6 +345,16 @@ def analyze_prediction_outputs(
     pipe_support_bundle["representatives"].to_csv(paths["pipe_support_representatives"], index=False, encoding="utf-8-sig")
     paths["pipe_support_llm_prompt"].write_text(pipe_support_bundle["llm_prompt"], encoding="utf-8")
     paths["pipe_support_report"].write_text(build_pipe_support_report(pipe_support_bundle, paths), encoding="utf-8")
+    leak_contact_bundle["focus"].to_csv(paths["leak_contact_focus"], index=False, encoding="utf-8-sig")
+    leak_contact_bundle["errors"].to_csv(paths["leak_contact_errors"], index=False, encoding="utf-8-sig")
+    leak_contact_bundle["fn"].to_csv(paths["leak_contact_fn"], index=False, encoding="utf-8-sig")
+    leak_contact_bundle["fp"].to_csv(paths["leak_contact_fp"], index=False, encoding="utf-8-sig")
+    leak_contact_bundle["correct_true"].to_csv(paths["leak_contact_correct_true"], index=False, encoding="utf-8-sig")
+    leak_contact_bundle["correct_false"].to_csv(paths["leak_contact_correct_false"], index=False, encoding="utf-8-sig")
+    leak_contact_bundle["clusters"].to_csv(paths["leak_contact_contrast_clusters"], index=False, encoding="utf-8-sig")
+    leak_contact_bundle["representatives"].to_csv(paths["leak_contact_representatives"], index=False, encoding="utf-8-sig")
+    paths["leak_contact_llm_prompt"].write_text(leak_contact_bundle["llm_prompt"], encoding="utf-8")
+    paths["leak_contact_report"].write_text(build_leak_contact_report(leak_contact_bundle, paths), encoding="utf-8")
     paths["report"].write_text(build_markdown_report(metrics, clusters_df, recurring_df, paths), encoding="utf-8")
 
     return paths
@@ -342,6 +458,7 @@ def normalize_predictions(df: pd.DataFrame) -> pd.DataFrame:
     work["decisive_evidence_obj"] = series_or_default(work, "decisive_evidence", "").map(parse_structured)
     work["visual_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "visual_evidence"), 1200))
     work["pipe_support_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "pipe_support_evidence"), 1200))
+    work["leak_contact_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "leak_contact_evidence"), 1200))
     work["key_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "key_evidence"), 1200))
     work["missing_evidence_text"] = work["evidence_obj"].map(lambda value: compact_text(extract_evidence_field(value, "missing_evidence"), 800))
     work["decisive_evidence_text"] = work["decisive_evidence_obj"].map(lambda value: compact_text(value, 1200))
@@ -448,6 +565,7 @@ def row_analysis_text(row: pd.Series) -> str:
         row.get("key_evidence_text", ""),
         row.get("visual_evidence_text", ""),
         row.get("pipe_support_evidence_text", ""),
+        row.get("leak_contact_evidence_text", ""),
         row.get("missing_evidence_text", ""),
         row.get("error", ""),
     ]
@@ -905,6 +1023,7 @@ def select_pipe_support_columns(df: pd.DataFrame) -> pd.DataFrame:
         "key_evidence_text",
         "visual_evidence_text",
         "pipe_support_evidence_text",
+        "leak_contact_evidence_text",
         "missing_evidence_text",
         "top_terms_row",
         "source_path",
@@ -1054,6 +1173,269 @@ def build_pipe_support_report(bundle: dict[str, Any], paths: dict[str, Path]) ->
     return "\n".join(lines) + "\n"
 
 
+def build_leak_contact_focus_bundle(
+    eligible: pd.DataFrame,
+    samples_per_group: int,
+    policy_text: str = "",
+    policy_path: str | Path | None = None,
+) -> dict[str, Any]:
+    if eligible.empty:
+        focus = eligible.copy()
+    else:
+        focus = eligible[eligible.apply(is_leak_contact_focus_row, axis=1)].copy()
+
+    if not focus.empty:
+        focus["leak_contact_subtype"] = focus["analysis_text"].map(assign_leak_contact_subtype)
+        focus["leak_contact_true_clues"] = focus["analysis_text"].map(lambda text: ", ".join(matched_keywords(text, LEAK_CONTACT_TRUE_CLUES, 12)))
+        focus["leak_contact_false_clues"] = focus["analysis_text"].map(lambda text: ", ".join(matched_keywords(text, LEAK_CONTACT_FALSE_CLUES, 12)))
+    else:
+        focus["leak_contact_subtype"] = ""
+        focus["leak_contact_true_clues"] = ""
+        focus["leak_contact_false_clues"] = ""
+
+    errors = focus[focus["correct_norm"] == False].copy() if "correct_norm" in focus else pd.DataFrame()
+    fn = focus[focus["error_type"] == "FN_true_as_false"].copy() if "error_type" in focus else pd.DataFrame()
+    fp = focus[focus["error_type"] == "FP_false_as_true"].copy() if "error_type" in focus else pd.DataFrame()
+    correct_true = focus[(focus["correct_norm"] == True) & (focus["label_norm"] == JIN)].copy() if "label_norm" in focus else pd.DataFrame()
+    correct_false = focus[(focus["correct_norm"] == True) & (focus["label_norm"] == GA)].copy() if "label_norm" in focus else pd.DataFrame()
+    clusters = build_leak_contact_contrast_clusters(focus)
+    representatives = build_leak_contact_representatives(focus, samples_per_group)
+    metrics = compute_pipe_support_metrics(focus)
+    brief = {
+        "purpose": "Focused leak/contact/unknown-material error brief. Use this to improve true recall without broad FP increase.",
+        "current_policy_path": str(policy_path or ""),
+        "metrics": metrics,
+        "clusters": clusters.to_dict("records") if not clusters.empty else [],
+        "representative_samples": representatives.to_dict("records") if not representatives.empty else [],
+        "current_policy": policy_text,
+    }
+
+    return {
+        "metrics": metrics,
+        "focus": select_leak_contact_columns(focus),
+        "errors": select_leak_contact_columns(errors),
+        "fn": select_leak_contact_columns(fn),
+        "fp": select_leak_contact_columns(fp),
+        "correct_true": select_leak_contact_columns(correct_true),
+        "correct_false": select_leak_contact_columns(correct_false),
+        "clusters": clusters,
+        "representatives": representatives,
+        "llm_prompt": build_leak_contact_llm_prompt(brief),
+    }
+
+
+def is_leak_contact_focus_row(row: pd.Series) -> bool:
+    if safe_str(row.get("keyword_bucket", "")) == "chemical_process":
+        return True
+    text = safe_str(row.get("analysis_text", ""))
+    if not text.strip():
+        return False
+    core_hits = matched_keywords(text, LEAK_CONTACT_CORE_KEYWORDS, 4)
+    if len(core_hits) >= 2:
+        return True
+    context_hits = matched_keywords(text, LEAK_CONTACT_CONTEXT_KEYWORDS, 4)
+    return bool(core_hits and context_hits)
+
+
+def assign_leak_contact_subtype(text: str) -> str:
+    if matched_keywords(text, ["응축수", "DIW", "물", "무해", "청소", "배수", "닦"], 1):
+        return "harmless_water_or_condensate"
+    if matched_keywords(text, ["미상", "성분", "냄새", "약품", "화학", "폐액"], 1):
+        return "unknown_material_or_chemical_uncertainty"
+    if matched_keywords(text, ["접촉", "접액", "흡입", "노출", "보호구"], 1):
+        return "worker_contact_or_inhalation"
+    if matched_keywords(text, ["가스", "LEL", "화재", "폭발", "질식", "환기", "가스측정"], 1):
+        return "gas_fire_explosion_or_asphyxiation"
+    if matched_keywords(text, ["누출", "누설", "배관", "밸브", "펌프", "Pump", "차단", "격리", "방제"], 1):
+        return "leak_source_confirmation"
+    return "leak_contact_general"
+
+
+def build_leak_contact_contrast_clusters(focus: pd.DataFrame) -> pd.DataFrame:
+    if focus.empty:
+        return pd.DataFrame()
+
+    rows = []
+    group_cols = ["error_type", "leak_contact_subtype", "major"]
+    grouped = focus.groupby(group_cols, dropna=False)
+    for key, group in sorted(grouped, key=lambda item: (error_sort_rank(item[0][0]), -len(item[1]))):
+        error_type, subtype, major = key
+        texts = list(group["analysis_text"].map(safe_str))
+        representatives = select_representative_rows(group, 4)
+        rows.append(
+            {
+                "error_type": safe_str(error_type),
+                "leak_contact_subtype": safe_str(subtype),
+                "major": safe_str(major),
+                "count": int(len(group)),
+                "unique_ids": int(group["id"].astype(str).nunique()) if "id" in group else int(len(group)),
+                "label_counts": value_counts_text(group.get("label_norm", pd.Series(dtype=str))),
+                "pred_counts": value_counts_text(group.get("pred_norm", pd.Series(dtype=str))),
+                "avg_confidence": round(float(group["confidence_num"].mean()), 2) if len(group) else 0,
+                "visual_evidence_rows": int(group["has_visual_evidence"].sum()) if "has_visual_evidence" in group else 0,
+                "true_clues": value_counts_from_csv(group.get("leak_contact_true_clues", pd.Series(dtype=str)), 10),
+                "false_clues": value_counts_from_csv(group.get("leak_contact_false_clues", pd.Series(dtype=str)), 10),
+                "top_terms": ", ".join(top_terms(texts, limit=12)),
+                "sample_ids": ", ".join(safe_str(row.get("id", "")) for row in representatives.to_dict("records")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_leak_contact_representatives(focus: pd.DataFrame, samples_per_group: int) -> pd.DataFrame:
+    if focus.empty:
+        return pd.DataFrame()
+
+    rows = []
+    group_cols = ["error_type", "leak_contact_subtype", "major"]
+    grouped = focus.groupby(group_cols, dropna=False)
+    for key, group in sorted(grouped, key=lambda item: (error_sort_rank(item[0][0]), -len(item[1])))[:40]:
+        error_type, subtype, major = key
+        representatives = select_representative_rows(group, samples_per_group)
+        for sample in representatives.to_dict("records"):
+            row = compact_leak_contact_sample(sample)
+            row["cluster_error_type"] = safe_str(error_type)
+            row["cluster_leak_contact_subtype"] = safe_str(subtype)
+            row["cluster_major"] = safe_str(major)
+            row["cluster_count"] = int(len(group))
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def compact_leak_contact_sample(row: dict) -> dict:
+    sample = compact_sample(row)
+    sample["leak_contact_subtype"] = safe_str(row.get("leak_contact_subtype", ""))
+    sample["leak_contact_true_clues"] = safe_str(row.get("leak_contact_true_clues", ""))
+    sample["leak_contact_false_clues"] = safe_str(row.get("leak_contact_false_clues", ""))
+    sample["leak_contact_evidence"] = compact_text(row.get("leak_contact_evidence_text", ""), 800)
+    return sample
+
+
+def select_leak_contact_columns(df: pd.DataFrame) -> pd.DataFrame:
+    preferred = [
+        "source_stage",
+        "source_file",
+        "id",
+        "title",
+        "major",
+        "middle",
+        "label_norm",
+        "pred_norm",
+        "correct_norm",
+        "error_type",
+        "confidence_num",
+        "leak_contact_subtype",
+        "leak_contact_true_clues",
+        "leak_contact_false_clues",
+        "reason",
+        "applied_step",
+        "decisive_evidence_text",
+        "key_evidence_text",
+        "visual_evidence_text",
+        "leak_contact_evidence_text",
+        "pipe_support_evidence_text",
+        "missing_evidence_text",
+        "top_terms_row",
+        "source_path",
+    ]
+    cols = [col for col in preferred if col in df.columns]
+    if not cols:
+        return pd.DataFrame(columns=preferred)
+    return df[cols].copy()
+
+
+def build_leak_contact_llm_prompt(brief: dict) -> str:
+    brief_text = json.dumps(brief, ensure_ascii=False, indent=2)
+    return f"""너는 작업중지권 진성/가성 분류 정책을 검토하는 안전관리 데이터 분석가다.
+
+아래 자료는 전체 오답이 아니라 누출, 접촉, 접액, 흡입, 냄새, 미상 액체, 응축수, DIW, 화학물질 불확실성 관련 사례만 따로 모은 것이다.
+목표는 진성 recall을 올리는 것이지만, 같은 군집에서 FP도 같이 발생하므로 "누출/미상액체/접촉" 전체를 진성으로 보내면 안 된다.
+
+반드시 다음 관점으로 분석하라.
+1. FN_true_as_false와 FP_false_as_true를 같은 subtype/대분류 안에서 비교한다.
+2. "누출", "접촉", "응축수", "DIW", "냄새" 같은 단어 자체가 아니라, 실제로 판정을 가르는 discriminator를 찾는다.
+3. discriminator는 작업중지 당시 성분 미상 여부, 사후 무해 확인 여부, 작업자 접촉·흡입 노출 가능성, 누출원 확인 필요성, 차단·격리·방제·환기·가스측정 필요성, 단순 청소·배수 가능 여부로 나눈다.
+4. `미상 액체`나 `누출` 전체를 진성으로 보내는 제안은 금지한다.
+5. 정책 변경이 필요하다면 1~2문장짜리 좁은 보강 규칙과, FP 방지 반례 조건을 함께 제안한다.
+6. 라벨 기준 자체가 흔들리는 영역이면 정책 변경 대신 "라벨 기준 확인 필요"로 분리한다.
+
+JSON만 출력하라.
+{{
+  "fn_fp_discriminators": [],
+  "high_value_narrow_rule": "",
+  "fp_guardrail": "",
+  "image_evidence_to_check": [],
+  "policy_change_risk": "",
+  "do_not_change": [],
+  "next_manual_review_targets": []
+}}
+
+[Leak/Contact Focus Brief]
+{brief_text}
+"""
+
+
+def build_leak_contact_report(bundle: dict[str, Any], paths: dict[str, Path]) -> str:
+    metrics = bundle["metrics"]
+    clusters = bundle["clusters"]
+    representatives = bundle["representatives"]
+    lines = [
+        "# Leak/Contact Focus Analysis",
+        "",
+        "This report isolates leak, contact, unknown-liquid, odor, gas, DIW/condensate, and chemical exposure uncertainty cases.",
+        "",
+        "## Metrics",
+        "",
+        f"- Focus rows: {metrics.get('focus_rows', 0)}",
+        f"- Focus errors: {metrics.get('focus_errors', 0)}",
+        f"- Focus accuracy: {metrics.get('focus_accuracy', 0):.4f}",
+        f"- True recall in focus: {metrics.get('true_recall', 0):.4f}",
+        f"- True precision in focus: {metrics.get('true_precision', 0):.4f}",
+        f"- False recall in focus: {metrics.get('false_recall', 0):.4f}",
+        f"- FN true-as-false in focus: {metrics.get('fn_true_as_false', 0)}",
+        f"- FP false-as-true in focus: {metrics.get('fp_false_as_true', 0)}",
+        "",
+        "## Output Files",
+        "",
+    ]
+    for name in [
+        "leak_contact_focus",
+        "leak_contact_errors",
+        "leak_contact_fn",
+        "leak_contact_fp",
+        "leak_contact_correct_true",
+        "leak_contact_correct_false",
+        "leak_contact_contrast_clusters",
+        "leak_contact_representatives",
+        "leak_contact_llm_prompt",
+    ]:
+        if name in paths:
+            lines.append(f"- {name}: `{paths[name]}`")
+
+    lines.extend(["", "## FN To Improve True Recall", ""])
+    fn_clusters = clusters[clusters["error_type"] == "FN_true_as_false"] if not clusters.empty and "error_type" in clusters else pd.DataFrame()
+    lines.extend(markdown_table(fn_clusters.head(20), ["leak_contact_subtype", "major", "count", "avg_confidence", "visual_evidence_rows", "true_clues", "false_clues", "top_terms"]))
+
+    lines.extend(["", "## FP To Guard Accuracy", ""])
+    fp_clusters = clusters[clusters["error_type"] == "FP_false_as_true"] if not clusters.empty and "error_type" in clusters else pd.DataFrame()
+    lines.extend(markdown_table(fp_clusters.head(20), ["leak_contact_subtype", "major", "count", "avg_confidence", "visual_evidence_rows", "true_clues", "false_clues", "top_terms"]))
+
+    lines.extend(["", "## Representative Samples", ""])
+    lines.extend(markdown_table(representatives.head(20), ["cluster_error_type", "cluster_leak_contact_subtype", "cluster_major", "id", "label", "pred", "confidence", "leak_contact_true_clues", "leak_contact_false_clues", "title"]))
+
+    lines.extend(
+        [
+            "",
+            "## How To Use",
+            "",
+            "1. Open `leak_contact_fn.csv` and `leak_contact_fp.csv` side by side.",
+            "2. Paste `leak_contact_llm_prompt.md` into the internal LLM for a focused diagnosis.",
+            "3. Only accept a new policy sentence if it catches repeated FN while clearly excluding DIW/condensate/simple-cleanup FP clusters.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def error_sort_rank(error_type: Any) -> int:
     order = {
         "FN_true_as_false": 0,
@@ -1162,6 +1544,7 @@ def compact_sample(row: dict) -> dict:
         "key_evidence": compact_text(row.get("key_evidence_text", ""), 700),
         "visual_evidence": compact_text(row.get("visual_evidence_text", ""), 700),
         "pipe_support_evidence": compact_text(row.get("pipe_support_evidence_text", ""), 700),
+        "leak_contact_evidence": compact_text(row.get("leak_contact_evidence_text", ""), 700),
         "top_terms": safe_str(row.get("top_terms_row", "")),
     }
 
