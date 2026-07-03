@@ -22,6 +22,7 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
         calls_per_minute=config.getint("runtime", "llm_calls_per_minute", fallback=25),
         retry_wait_seconds=config.getint("runtime", "llm_retry_wait_seconds", fallback=300),
         max_attempts=config.getint("runtime", "llm_max_attempts", fallback=20),
+        log_rate_limit_waits=config.getboolean("runtime", "llm_log_rate_limit_waits", fallback=False),
     )
 
     records = list(df.to_dict("records"))

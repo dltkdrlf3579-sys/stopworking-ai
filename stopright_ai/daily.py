@@ -77,6 +77,11 @@ def configure_llm_runtime_from_config(config: Any) -> None:
             "llm_max_attempts",
             fallback=config.getint("runtime", "llm_max_attempts", fallback=20),
         ),
+        log_rate_limit_waits=config.getboolean(
+            "daily_prediction",
+            "llm_log_rate_limit_waits",
+            fallback=config.getboolean("runtime", "llm_log_rate_limit_waits", fallback=False),
+        ),
     )
 
 

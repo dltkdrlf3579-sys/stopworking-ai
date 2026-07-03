@@ -13,6 +13,7 @@ class LlmRuntimeConfig:
         self.calls_per_minute = 25
         self.retry_wait_seconds = 300
         self.max_attempts = 20
+        self.log_rate_limit_waits = False
         self.rate_limiter = RateLimiter(self.calls_per_minute, 60)
 
 
@@ -46,17 +47,24 @@ class RateLimiter:
 
                 sleep_seconds = max(0.1, self.window_seconds - (now - self._calls[0]) + 0.1)
 
-            print(f"[llm-rate-limit] waiting {sleep_seconds:.1f}s", flush=True)
+            if _RUNTIME.log_rate_limit_waits:
+                print(f"[llm-rate-limit] waiting {sleep_seconds:.1f}s", flush=True)
             time.sleep(sleep_seconds)
 
 
 _RUNTIME = LlmRuntimeConfig()
 
 
-def configure_llm_runtime(calls_per_minute: int = 25, retry_wait_seconds: int = 300, max_attempts: int = 20) -> None:
+def configure_llm_runtime(
+    calls_per_minute: int = 25,
+    retry_wait_seconds: int = 300,
+    max_attempts: int = 20,
+    log_rate_limit_waits: bool = False,
+) -> None:
     _RUNTIME.calls_per_minute = max(1, int(calls_per_minute))
     _RUNTIME.retry_wait_seconds = max(1, int(retry_wait_seconds))
     _RUNTIME.max_attempts = max(1, int(max_attempts))
+    _RUNTIME.log_rate_limit_waits = bool(log_rate_limit_waits)
     _RUNTIME.rate_limiter.update(_RUNTIME.calls_per_minute, 60)
 
 
