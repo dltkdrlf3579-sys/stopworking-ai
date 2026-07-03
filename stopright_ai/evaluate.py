@@ -15,6 +15,7 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
     started = time.monotonic()
     max_workers = config.getint("runtime", "max_workers", fallback=8)
     mode = config.get("runtime", "judge_mode", fallback="tournament")
+    route_score_mode = config.get("runtime", "route_score_mode", fallback="record")
     progress_every = config.getint("runtime", "progress_every", fallback=10)
     heartbeat_seconds = config.getint("runtime", "heartbeat_seconds", fallback=30)
     trace_first_n = config.getint("runtime", "trace_first_n", fallback=0)
@@ -38,7 +39,7 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
         futures = []
         for idx, row in enumerate(records, start=1):
             case = row_to_case(row, config)
-            futures.append(executor.submit(_safe_judge_case, case, llm, policy, mode, idx <= trace_first_n))
+            futures.append(executor.submit(_safe_judge_case, case, llm, policy, mode, idx <= trace_first_n, route_score_mode))
 
         pending = set(futures)
         done_count = 0
@@ -82,9 +83,16 @@ def format_live_metrics(results: list[dict]) -> str:
     )
 
 
-def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str, trace: bool = False) -> dict:
+def _safe_judge_case(
+    case: dict,
+    llm: Any,
+    policy: str,
+    mode: str,
+    trace: bool = False,
+    route_score_mode: str = "record",
+) -> dict:
     try:
-        return judge_case(case=case, llm=llm, policy=policy, mode=mode, trace=trace)
+        return judge_case(case=case, llm=llm, policy=policy, mode=mode, trace=trace, route_score_mode=route_score_mode)
     except Exception as exc:
         if is_context_length_error(exc):
             return {

@@ -34,8 +34,17 @@ def evidence_user(case: dict) -> str:
 [출력 JSON 스키마]
 {{
   "normalized_summary": "사건 요약",
+  "cluster": "forced_pipe_or_support_stepping|leak_or_contact_uncertainty|height_or_access_fall|none",
   "work_timing": "작업전|작업중|작업후|불명",
   "physical_risk": "있음|없음|불명",
+  "actual_physical_hazard": true,
+  "actual_physical_hazard_evidence": ["직접 확인된 물리적 위험 근거"],
+  "simple_admin_or_precheck": false,
+  "simple_admin_or_precheck_evidence": ["계획/협의/허가/일정/일반점검 근거"],
+  "simple_correction_possible": false,
+  "simple_correction_evidence": ["단순 청소, 배수, 정리정돈, 위치변경, 교육 등 즉시 시정 근거"],
+  "requires_physical_or_process_control": false,
+  "control_evidence": ["비계, 보강판, 임시발판, 차단, 격리, 방제, 환기, 가스측정, ERT 등 근거"],
   "risk_type": ["추락", "낙하", "끼임", "충돌", "협착", "감전", "화재", "폭발", "누출", "붕괴", "유해가스", "화학물질노출", "전도", "기타"],
   "unexpected_emergency": "있음|없음|불명",
   "imminent_severe_accident": "있음|없음|불명",
@@ -45,6 +54,11 @@ def evidence_user(case: dict) -> str:
   "key_evidence": ["핵심 근거 문장 또는 관찰"],
   "visual_evidence": ["이미지에서 직접 확인한 위험 또는 상태. 이미지 입력이 없거나 확인 불가하면 빈 배열"],
   "pipe_support_evidence": {{
+    "stepping_required_on_forbidden_equipment": false,
+    "actual_stepping_observed": false,
+    "forbidden_equipment_type": "케미컬라인|Toxic Duct|가동설비|배관|서포트|덕트|전기설비|해당없음|불명확",
+    "access_reinforcement_needed": false,
+    "access_reinforcement_evidence": ["발판 부족, 비계, 보강판, 커버, 임시발판, 작업방법 변경, 위험 제거 협의 근거"],
     "safe_foothold_or_path": "안전한 발판·이동경로가 보이는지. 확인불가면 확인불가",
     "pipe_or_support_stepping": "배관·서포트·설비 프레임을 밟거나 밟아야 하는 정황이 보이는지. 확인불가면 확인불가",
     "work_height_or_fall_context": "고소·개구부·난간·사다리·비계·추락 관련 시각 정황",
@@ -53,6 +67,16 @@ def evidence_user(case: dict) -> str:
     "visual_uncertainty": ["이미지만으로 확인 불가하거나 추가 확인이 필요한 사항"]
   }},
   "leak_contact_evidence": {{
+    "leak_signal_type": "실제누출|미상액체|냄새|가스|연기|분진|약품흔적|센서알람|SW경고|해당없음|불명확",
+    "leak_material_status_at_stop": "미상|DIW|응축수|물|화학물질|가스|센서테스트|SW경고|해당없음|불명확",
+    "post_harmless_confirmation": false,
+    "active_release_or_physical_event": false,
+    "active_release_or_physical_event_evidence": ["분출, 활성누출, 스파크, 감전충격, 유해가스경보 등 근거"],
+    "worker_exposure_path": "접촉|흡입|전기설비인접|밀폐공간|원격/개방|해당없음|불명확",
+    "emergency_or_special_response": false,
+    "emergency_or_special_response_evidence": ["ERT, 현장이탈, 전문방제, 격리, 환기, 가스측정 등 근거"],
+    "benign_alarm_or_harmless_leak_guardrail": false,
+    "benign_alarm_or_harmless_leak_evidence": ["센서테스트, SW경고, DIW, 응축수, 물, 단순결로, 청소/배수 등 근거"],
     "observed_material_or_signal": "액체, 가스, 냄새, 연기, 분진, 약품 흔적, 누출 흔적, 고임, 젖음, 변색 등 관찰된 물질 또는 신호",
     "material_identity_at_stop_time": "작업중지 당시 성분이 미상인지, DIW·응축수·물 등 무해성이 이미 확인됐는지, 사후 확인인지 구분",
     "source_or_boundary": "누출원, 배관, 밸브, 펌프, 탱크, 장비 하부, 차단·격리 경계가 확인되는지",
@@ -78,7 +102,7 @@ ADVOCATE_FALSE_SYSTEM = """너는 가성 판정 측 검토자다.
 반드시 JSON 하나만 출력한다."""
 
 
-def advocate_user(case: dict, evidence: dict, policy: str, side: str) -> str:
+def advocate_user(case: dict, evidence: dict, policy: str, side: str, route_scorecard: dict | None = None) -> str:
     return f"""
 [정책]
 {policy}
@@ -88,6 +112,7 @@ def advocate_user(case: dict, evidence: dict, policy: str, side: str) -> str:
 
 [추출 증거]
 {evidence}
+{route_score_section(route_scorecard)}
 
 {side} 관점에서 판단 근거를 작성하라.
 
@@ -132,11 +157,22 @@ def critic_user(case: dict, evidence: dict, true_argument: dict, false_argument:
 
 ARBITER_SYSTEM = """너는 작업중지권 최종 판정자다.
 정책과 추출 증거를 우선하고, 주장 문구보다 실제 증거를 더 신뢰한다.
+특수 루트 점수판이 제공되면 배관·서포트·발판·이동경로 및 누출·접액·미상액체 사례에서 진성/가성 신호의 균형을 확인한다.
+점수판의 recommendation이 "가성"이고 false_score가 true_score보다 충분히 높으면, 단어만 보고 진성으로 끌어올리는 오류를 경계한다.
+점수판의 recommendation이 "경계"이면 진성/가성 신호가 섞인 것이므로 decisive_evidence에 어떤 신호를 더 중요하게 보았는지 적는다.
 최종 판정은 반드시 진성 또는 가성 중 하나다.
 반드시 JSON 하나만 출력한다."""
 
 
-def arbiter_user(case: dict, evidence: dict, policy: str, true_argument: dict | None = None, false_argument: dict | None = None, critic: dict | None = None) -> str:
+def arbiter_user(
+    case: dict,
+    evidence: dict,
+    policy: str,
+    true_argument: dict | None = None,
+    false_argument: dict | None = None,
+    critic: dict | None = None,
+    route_scorecard: dict | None = None,
+) -> str:
     return f"""
 [정책]
 {policy}
@@ -146,6 +182,7 @@ def arbiter_user(case: dict, evidence: dict, policy: str, true_argument: dict | 
 
 [추출 증거]
 {evidence}
+{route_score_section(route_scorecard)}
 
 [진성 측 주장]
 {true_argument or {}}
@@ -175,6 +212,15 @@ def case_for_text_prompt(case: dict) -> dict:
         redacted["image_data_url_count"] = len(image_data_urls)
         redacted["image_data_urls"] = "[멀티모달 이미지 입력으로 별도 전달됨]"
     return redacted
+
+
+def route_score_section(route_scorecard: dict | None) -> str:
+    if not route_scorecard:
+        return ""
+    return f"""
+[특수 루트 점수판]
+{route_scorecard}
+"""
 
 
 CANDIDATE_SYSTEM = """너는 작업중지권 판정 정책 개선 연구원이다.

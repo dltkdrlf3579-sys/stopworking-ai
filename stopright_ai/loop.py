@@ -13,6 +13,7 @@ from .evaluate import evaluate_policy
 from .llm_factory import create_llm
 from .llm_json import configure_llm_runtime
 from .policy import load_policy, make_policy_diff, save_policy, should_promote, validate_candidate_policy
+from .route_tuning import run_guardrail_autotune
 from .sampling import build_train_validation_dfs
 
 
@@ -49,6 +50,20 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
 
     print(f"[cycle {cycle}] run_dir={run_dir}", flush=True)
     print(f"[cycle {cycle}] train rows={len(train_df)}, validation rows={len(validation_df)}", flush=True)
+
+    route_score_mode = config.get("runtime", "route_score_mode", fallback="record").strip().lower()
+    if route_score_mode in {"sweep", "all", "compare"}:
+        return run_route_score_sweep_cycle(
+            config=config,
+            llm=llm,
+            cycle=cycle,
+            run_dir=run_dir,
+            train_df=train_df,
+            validation_df=validation_df,
+            current_policy=current_policy,
+            started_at=started_at,
+            started=started,
+        )
 
     train_pred_df, train_base_metrics = evaluate_policy(train_df, llm, config, current_policy, label="train-baseline")
     save_predictions(run_dir / "train_baseline_predictions.csv", train_pred_df)
@@ -155,6 +170,220 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
     save_json(run_dir / "cycle_result.json", result)
     print(f"[cycle {cycle}] done: elapsed={format_elapsed(elapsed_seconds)}", flush=True)
     return result
+
+
+def run_route_score_sweep_cycle(
+    config: Any,
+    llm: Any,
+    cycle: int,
+    run_dir: Path,
+    train_df: pd.DataFrame,
+    validation_df: pd.DataFrame,
+    current_policy: str,
+    started_at: datetime,
+    started: float,
+) -> dict:
+    modes = get_route_score_sweep_modes(config)
+    original_mode = config.get("runtime", "route_score_mode", fallback="record")
+    mode_results = []
+
+    print(f"[cycle {cycle}] route_score_mode sweep: modes={','.join(modes)}", flush=True)
+    print(f"[cycle {cycle}] candidate generation skipped during route_score sweep", flush=True)
+
+    try:
+        for mode in modes:
+            config.set("runtime", "route_score_mode", mode)
+            mode_dir = run_dir / f"route_score_{sanitize_name(mode)}"
+            mode_dir.mkdir(parents=True, exist_ok=True)
+            (mode_dir / "current_policy.md").write_text(current_policy, encoding="utf-8")
+
+            train_pred_df, train_metrics = evaluate_policy(
+                train_df,
+                llm,
+                config,
+                current_policy,
+                label=f"train-route-{mode}",
+            )
+            save_predictions(mode_dir / "train_predictions.csv", train_pred_df)
+            save_json(mode_dir / "train_metrics.json", train_metrics)
+
+            validation_pred_df, validation_metrics = evaluate_policy(
+                validation_df,
+                llm,
+                config,
+                current_policy,
+                label=f"validation-route-{mode}",
+            )
+            save_predictions(mode_dir / "validation_predictions.csv", validation_pred_df)
+            save_json(mode_dir / "validation_metrics.json", validation_metrics)
+
+            mode_result = {
+                "mode": mode,
+                "train_metrics": train_metrics,
+                "validation_metrics": validation_metrics,
+                "train_predictions_path": str(mode_dir / "train_predictions.csv"),
+                "validation_predictions_path": str(mode_dir / "validation_predictions.csv"),
+            }
+            mode_results.append(mode_result)
+            print_route_mode_summary(cycle, mode, validation_metrics)
+
+        if config.getboolean("runtime", "route_score_autotune", fallback=True):
+            autotune_result = maybe_run_route_score_autotune(
+                config=config,
+                run_dir=run_dir,
+                mode_results=mode_results,
+                cycle=cycle,
+            )
+            if autotune_result:
+                mode_results.append(autotune_result)
+    finally:
+        config.set("runtime", "route_score_mode", original_mode)
+
+    comparison_df = build_route_mode_comparison(mode_results)
+    comparison_df.to_csv(run_dir / "route_score_mode_comparison.csv", index=False, encoding="utf-8-sig")
+    save_json(run_dir / "route_score_mode_comparison.json", mode_results)
+
+    winner = max(mode_results, key=lambda item: item["validation_metrics"].get("score", 0)) if mode_results else None
+    ended_at = datetime.now()
+    elapsed_seconds = time.monotonic() - started
+    result = {
+        "cycle": cycle,
+        "run_dir": str(run_dir),
+        "started_at": started_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "ended_at": ended_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "elapsed_seconds": elapsed_seconds,
+        "sweep": True,
+        "route_score_modes": modes,
+        "mode_results": mode_results,
+        "train_base_metrics": mode_results[0]["train_metrics"] if mode_results else {},
+        "base_metrics": mode_results[0]["validation_metrics"] if mode_results else {},
+        "validation_base_metrics": mode_results[0]["validation_metrics"] if mode_results else {},
+        "winner_name": f"route_score_mode:{winner['mode']}" if winner else "none",
+        "winner_metrics": winner["validation_metrics"] if winner else {},
+        "promoted": False,
+        "promotion_reason": "route_score sweep only; policy promotion disabled",
+    }
+    save_json(run_dir / "cycle_result.json", result)
+    print(f"[cycle {cycle}] route_score sweep done: winner={result['winner_name']} elapsed={format_elapsed(elapsed_seconds)}", flush=True)
+    return result
+
+
+def maybe_run_route_score_autotune(config: Any, run_dir: Path, mode_results: list[dict], cycle: int) -> dict | None:
+    record = next((item for item in mode_results if item.get("mode") == "record"), None)
+    if not record:
+        print(f"[cycle {cycle}] route_score autotune skipped: record mode result not found", flush=True)
+        return None
+
+    train_path = Path(record["train_predictions_path"])
+    validation_path = Path(record["validation_predictions_path"])
+    if not train_path.exists() or not validation_path.exists():
+        print(f"[cycle {cycle}] route_score autotune skipped: record prediction files not found", flush=True)
+        return None
+
+    print(f"[cycle {cycle}] route_score autotune: searching guardrail thresholds", flush=True)
+    train_pred_df = pd.read_csv(train_path)
+    validation_pred_df = pd.read_csv(validation_path)
+    tuning = run_guardrail_autotune(train_pred_df, validation_pred_df, config)
+    best = tuning["best"]
+
+    tune_dir = run_dir / "route_score_autotuned_guardrail"
+    tune_dir.mkdir(parents=True, exist_ok=True)
+    save_predictions(tune_dir / "train_predictions.csv", best["train_predictions"])
+    save_predictions(tune_dir / "validation_predictions.csv", best["validation_predictions"])
+    save_json(tune_dir / "train_metrics.json", best["train_metrics"])
+    save_json(tune_dir / "validation_metrics.json", best["validation_metrics"])
+    save_json(
+        tune_dir / "selected_guardrail.json",
+        {
+            "candidate": best["candidate"],
+            "train_delta": best["train_delta"],
+            "validation_delta": best["validation_delta"],
+            "summary_row": best["summary_row"],
+        },
+    )
+    pd.DataFrame(tuning["candidates"]).to_csv(tune_dir / "candidate_thresholds.csv", index=False, encoding="utf-8-sig")
+
+    metrics = best["validation_metrics"]
+    print(
+        f"[cycle {cycle}] route_score autotuned_guardrail "
+        f"candidate={best['candidate'].get('name')} "
+        f"validation acc={metrics.get('accuracy', 0):.4f} "
+        f"score={metrics.get('score', 0):.4f} "
+        f"TR={metrics.get('true_recall', 0):.4f} "
+        f"TP={metrics.get('true_precision', 0):.4f}",
+        flush=True,
+    )
+
+    return {
+        "mode": "autotuned_guardrail",
+        "train_metrics": best["train_metrics"],
+        "validation_metrics": best["validation_metrics"],
+        "train_predictions_path": str(tune_dir / "train_predictions.csv"),
+        "validation_predictions_path": str(tune_dir / "validation_predictions.csv"),
+        "autotune_candidate": best["candidate"],
+        "autotune_train_delta": best["train_delta"],
+        "autotune_validation_delta": best["validation_delta"],
+    }
+
+
+def get_route_score_sweep_modes(config: Any) -> list[str]:
+    raw = config.get("runtime", "route_score_modes", fallback="record,assist,guardrail")
+    modes = []
+    for item in raw.split(","):
+        mode = item.strip().lower()
+        if not mode:
+            continue
+        if mode in {"sweep", "all", "compare"}:
+            continue
+        if mode not in {"off", "record", "assist", "guardrail"}:
+            print(f"[route_score_sweep] ignored unknown mode: {mode}", flush=True)
+            continue
+        if mode not in modes:
+            modes.append(mode)
+    return modes or ["record", "assist", "guardrail"]
+
+
+def build_route_mode_comparison(mode_results: list[dict]) -> pd.DataFrame:
+    rows = []
+    for item in mode_results:
+        train = item.get("train_metrics", {})
+        validation = item.get("validation_metrics", {})
+        rows.append(
+            {
+                "mode": item.get("mode", ""),
+                "train_accuracy": train.get("accuracy", 0),
+                "train_score": train.get("score", 0),
+                "train_true_recall": train.get("true_recall", 0),
+                "train_true_precision": train.get("true_precision", 0),
+                "train_false_recall": train.get("false_recall", 0),
+                "train_false_precision": train.get("false_precision", 0),
+                "train_fn_true_as_false": train.get("fn_true_as_false", 0),
+                "train_fp_false_as_true": train.get("fp_false_as_true", 0),
+                "validation_accuracy": validation.get("accuracy", 0),
+                "validation_score": validation.get("score", 0),
+                "validation_true_recall": validation.get("true_recall", 0),
+                "validation_true_precision": validation.get("true_precision", 0),
+                "validation_false_recall": validation.get("false_recall", 0),
+                "validation_false_precision": validation.get("false_precision", 0),
+                "validation_fn_true_as_false": validation.get("fn_true_as_false", 0),
+                "validation_fp_false_as_true": validation.get("fp_false_as_true", 0),
+                "validation_excluded_n": validation.get("excluded_n", 0),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def print_route_mode_summary(cycle: int, mode: str, metrics: dict) -> None:
+    print(
+        f"[cycle {cycle}] route_score_mode={mode} "
+        f"validation acc={metrics.get('accuracy', 0):.4f} "
+        f"score={metrics.get('score', 0):.4f} "
+        f"TR={metrics.get('true_recall', 0):.4f} "
+        f"TP={metrics.get('true_precision', 0):.4f} "
+        f"FR={metrics.get('false_recall', 0):.4f} "
+        f"FP={metrics.get('false_precision', 0):.4f}",
+        flush=True,
+    )
 
 
 def configure_llm_runtime_from_config(config: Any) -> None:

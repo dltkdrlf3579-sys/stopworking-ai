@@ -148,6 +148,11 @@ def dedupe_daily_df(df: pd.DataFrame, config: Any) -> pd.DataFrame:
 def predict_daily_df(df: pd.DataFrame, config: Any, llm: Any, policy: str) -> pd.DataFrame:
     max_workers = config.getint("daily_prediction", "max_workers", fallback=config.getint("runtime", "max_workers", fallback=8))
     mode = config.get("daily_prediction", "judge_mode", fallback=config.get("runtime", "judge_mode", fallback="tournament"))
+    route_score_mode = config.get(
+        "daily_prediction",
+        "route_score_mode",
+        fallback=config.get("runtime", "route_score_mode", fallback="record"),
+    )
     progress_every = config.getint("runtime", "progress_every", fallback=10)
     heartbeat_seconds = config.getint("runtime", "heartbeat_seconds", fallback=30)
     trace_first_n = config.getint("runtime", "trace_first_n", fallback=0)
@@ -156,13 +161,13 @@ def predict_daily_df(df: pd.DataFrame, config: Any, llm: Any, policy: str) -> pd
     total = len(records)
     results: list[dict] = []
     started = time.monotonic()
-    print(f"[daily] start prediction: rows={total}, mode={mode}, max_workers={max_workers}")
+    print(f"[daily] start prediction: rows={total}, mode={mode}, route_score_mode={route_score_mode}, max_workers={max_workers}")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for idx, row in enumerate(records, start=1):
             case = row_to_case(row, config)
-            futures.append(executor.submit(safe_daily_judge, case, llm, policy, mode, idx <= trace_first_n))
+            futures.append(executor.submit(safe_daily_judge, case, llm, policy, mode, idx <= trace_first_n, route_score_mode))
 
         pending = set(futures)
         done_count = 0
@@ -183,9 +188,16 @@ def predict_daily_df(df: pd.DataFrame, config: Any, llm: Any, policy: str) -> pd
     return pd.DataFrame(results)
 
 
-def safe_daily_judge(case: dict, llm: Any, policy: str, mode: str, trace: bool = False) -> dict:
+def safe_daily_judge(
+    case: dict,
+    llm: Any,
+    policy: str,
+    mode: str,
+    trace: bool = False,
+    route_score_mode: str = "record",
+) -> dict:
     try:
-        result = judge_case(case=case, llm=llm, policy=policy, mode=mode, trace=trace)
+        result = judge_case(case=case, llm=llm, policy=policy, mode=mode, trace=trace, route_score_mode=route_score_mode)
         result["error_yn"] = False
         result["error_message"] = ""
         return result
