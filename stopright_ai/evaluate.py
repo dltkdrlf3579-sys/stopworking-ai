@@ -44,14 +44,14 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
         while pending:
             completed, pending = wait(pending, timeout=heartbeat_seconds, return_when=FIRST_COMPLETED)
             if not completed:
-                print(f"[{label}] heartbeat: completed={done_count}/{total}, pending={len(pending)}", flush=True)
+                print(f"[{label}] heartbeat: completed={done_count}/{total}, pending={len(pending)} {format_live_metrics(results)}", flush=True)
                 continue
 
             for future in completed:
                 results.append(future.result())
                 done_count += 1
                 if done_count == total or (progress_every > 0 and done_count % progress_every == 0):
-                    print(f"[{label}] progress: {done_count}/{total}", flush=True)
+                    print(f"[{label}] progress: {done_count}/{total} {format_live_metrics(results)}", flush=True)
 
     pred_df = pd.DataFrame(results)
     metrics = compute_metrics(pred_df)
@@ -63,6 +63,22 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
         flush=True,
     )
     return pred_df, metrics
+
+
+def format_live_metrics(results: list[dict]) -> str:
+    metrics = compute_metrics(pd.DataFrame(results))
+    n = metrics.get("n", 0)
+    excluded = metrics.get("excluded_n", 0)
+    return (
+        f"n={n}, excluded={excluded}, "
+        f"acc={metrics.get('accuracy', 0):.4f}, "
+        f"TR={metrics.get('true_recall', 0):.4f}, "
+        f"TP={metrics.get('true_precision', 0):.4f}, "
+        f"FR={metrics.get('false_recall', 0):.4f}, "
+        f"FP={metrics.get('false_precision', 0):.4f}, "
+        f"FN={metrics.get('fn_true_as_false', 0)}, "
+        f"FPerr={metrics.get('fp_false_as_true', 0)}"
+    )
 
 
 def _safe_judge_case(case: dict, llm: Any, policy: str, mode: str, trace: bool = False) -> dict:
