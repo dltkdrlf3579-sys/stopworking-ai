@@ -142,6 +142,8 @@ def generate_candidate_policies(
     candidate_count: int,
     config: Any | None = None,
 ) -> list[dict]:
+    if candidate_count <= 0:
+        return []
     if not error_clusters:
         return []
 

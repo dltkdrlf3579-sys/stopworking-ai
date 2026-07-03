@@ -60,8 +60,12 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
     print(f"[cycle {cycle}] error_clusters={len(error_clusters)}", flush=True)
 
     candidate_count = config.getint("policy", "candidate_count", fallback=3)
-    print(f"[cycle {cycle}] generating candidates: count={candidate_count}", flush=True)
-    candidates = generate_candidate_policies(llm, current_policy, error_clusters, candidate_count, config=config)
+    if candidate_count <= 0:
+        print(f"[cycle {cycle}] candidate generation skipped: candidate_count={candidate_count}", flush=True)
+        candidates = []
+    else:
+        print(f"[cycle {cycle}] generating candidates: count={candidate_count}", flush=True)
+        candidates = generate_candidate_policies(llm, current_policy, error_clusters, candidate_count, config=config)
     save_json(run_dir / "candidate_manifest.json", candidates)
     print(f"[cycle {cycle}] generated candidates={len(candidates)}", flush=True)
 
