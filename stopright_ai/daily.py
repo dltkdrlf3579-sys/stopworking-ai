@@ -18,6 +18,7 @@ from .llm_factory import create_llm
 from .llm_json import configure_llm_runtime
 from .logging import install_timestamped_print
 from .policy import load_policy
+from .route_score import configure_route_score_profile_from_config
 
 
 def run_daily_prediction(config_path: str = "config.ini", target_date: str | None = None, llm: Any | None = None) -> dict:
@@ -156,12 +157,16 @@ def predict_daily_df(df: pd.DataFrame, config: Any, llm: Any, policy: str) -> pd
     progress_every = config.getint("runtime", "progress_every", fallback=10)
     heartbeat_seconds = config.getint("runtime", "heartbeat_seconds", fallback=30)
     trace_first_n = config.getint("runtime", "trace_first_n", fallback=0)
+    active_profile = configure_route_score_profile_from_config(config)
 
     records = list(df.to_dict("records"))
     total = len(records)
     results: list[dict] = []
     started = time.monotonic()
-    print(f"[daily] start prediction: rows={total}, mode={mode}, route_score_mode={route_score_mode}, max_workers={max_workers}")
+    print(
+        f"[daily] start prediction: rows={total}, mode={mode}, route_score_mode={route_score_mode}, "
+        f"route_profile={active_profile.get('name', 'base') if active_profile else 'base'}, max_workers={max_workers}"
+    )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []

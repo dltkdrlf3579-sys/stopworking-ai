@@ -1,15 +1,48 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 
 JIN = "진성"
 GA = "가성"
 REVIEW = "경계"
+ACTIVE_PROFILE: dict[str, Any] = {}
 
 
-def build_route_scorecard(case: dict, evidence: dict) -> dict:
+def set_active_route_score_profile(profile: dict | None) -> None:
+    global ACTIVE_PROFILE
+    ACTIVE_PROFILE = profile or {}
+
+
+def get_active_route_score_profile() -> dict:
+    return ACTIVE_PROFILE or {}
+
+
+def configure_route_score_profile_from_config(config: Any) -> dict:
+    profile = load_route_score_profile_from_config(config)
+    set_active_route_score_profile(profile)
+    return profile
+
+
+def load_route_score_profile_from_config(config: Any) -> dict:
+    if not config.getboolean("runtime", "route_score_profile_enabled", fallback=True):
+        return {}
+    profile_path = Path(config.get("runtime", "route_score_profile_path", fallback="artifacts/route_score_profile.json"))
+    if not profile_path.exists():
+        return {}
+    try:
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[route_score_profile] failed to load {profile_path}: {exc}", flush=True)
+        return {}
+    if not isinstance(profile, dict):
+        return {}
+    return profile.get("profile", profile)
+
+
+def build_route_scorecard(case: dict, evidence: dict, profile: dict | None = None) -> dict:
     """Build a lightweight, auditable scorecard for recurring hard routes.
 
     The scorecard does not use labels. It only summarizes signals from the case
@@ -20,12 +53,14 @@ def build_route_scorecard(case: dict, evidence: dict) -> dict:
     evidence_text = flatten_values(evidence)
     text = f"{case_text}\n{evidence_text}".lower()
 
+    profile = profile if profile is not None else get_active_route_score_profile()
+
     route_cards = []
-    pipe_card = score_pipe_support_route(text)
+    pipe_card = score_pipe_support_route(text, profile)
     if pipe_card["triggered"]:
         route_cards.append(pipe_card)
 
-    leak_card = score_leak_contact_route(text)
+    leak_card = score_leak_contact_route(text, profile)
     if leak_card["triggered"]:
         route_cards.append(leak_card)
 
@@ -61,6 +96,7 @@ def build_route_scorecard(case: dict, evidence: dict) -> dict:
         "margin": primary["true_score"] - primary["false_score"],
         "review_needed": review_needed,
         "guardrail_override": should_guardrail_override_to_false(primary),
+        "profile_name": profile.get("name", "base") if profile else "base",
         "reason": reason,
         "routes": route_cards,
     }
@@ -94,7 +130,7 @@ def apply_route_guardrail(result: dict) -> dict:
     return result
 
 
-def score_pipe_support_route(text: str) -> dict:
+def score_pipe_support_route(text: str, profile: dict | None = None) -> dict:
     true_score = 0
     false_score = 0
     true_signals: list[str] = []
@@ -149,10 +185,11 @@ def score_pipe_support_route(text: str) -> dict:
     if has_any(text, ["통로확보", "통로 확보", "정리정돈", "위치 변경", "자재 이동", "교육", "표지", "보호구", "재체결"]):
         false_score += add_false(2, "단순 시정 가능 신호")
 
-    return finalize_route_card("pipe_support", triggered, true_score, false_score, true_signals, false_signals)
+    card = finalize_route_card("pipe_support", triggered, true_score, false_score, true_signals, false_signals)
+    return apply_profile_to_route_card(card, profile)
 
 
-def score_leak_contact_route(text: str) -> dict:
+def score_leak_contact_route(text: str, profile: dict | None = None) -> dict:
     true_score = 0
     false_score = 0
     true_signals: list[str] = []
@@ -201,7 +238,8 @@ def score_leak_contact_route(text: str) -> dict:
     if has_any(text, ["청소", "닦음", "배수", "소량", "관리기준 이내", "계획된", "유지보수", "예상된 반응", "단순 점검"]):
         false_score += add_false(2, "단순 청소·배수·계획 유지보수로 통제")
 
-    return finalize_route_card("leak_contact", triggered, true_score, false_score, true_signals, false_signals)
+    card = finalize_route_card("leak_contact", triggered, true_score, false_score, true_signals, false_signals)
+    return apply_profile_to_route_card(card, profile)
 
 
 def finalize_route_card(
@@ -237,6 +275,125 @@ def finalize_route_card(
     }
 
 
+def apply_profile_to_scorecard(scorecard: dict, profile: dict | None) -> dict:
+    """Re-score an existing scorecard with a candidate profile.
+
+    This makes route-score evolution cheap: once the expensive LLM judgement
+    produced evidence and a base scorecard, we can test many score profiles
+    without calling the LLM again.
+    """
+    if not isinstance(scorecard, dict):
+        return {}
+    profile = profile or {}
+    routes = [
+        apply_profile_to_route_card(route, profile)
+        for route in scorecard.get("routes", [])
+        if isinstance(route, dict)
+    ]
+    if not routes:
+        result = dict(scorecard)
+        result["profile_name"] = profile.get("name", "base") if profile else scorecard.get("profile_name", "base")
+        return result
+
+    primary = max(routes, key=lambda card: card.get("true_score", 0) + card.get("false_score", 0))
+    recommendations = {card.get("recommendation") for card in routes}
+    conflicting_routes = len(recommendations - {REVIEW}) > 1
+    recommendation = primary.get("recommendation", REVIEW)
+    reason = primary.get("reason", "")
+    review_needed = bool(primary.get("review_needed", False)) or conflicting_routes
+    if conflicting_routes:
+        recommendation = REVIEW
+        reason = "배관/접액 등 복수 특수 루트의 권고가 충돌함"
+
+    return {
+        **scorecard,
+        "primary_route": primary.get("route", scorecard.get("primary_route", "general")),
+        "recommendation": recommendation,
+        "true_score": int(primary.get("true_score", 0)),
+        "false_score": int(primary.get("false_score", 0)),
+        "margin": int(primary.get("true_score", 0)) - int(primary.get("false_score", 0)),
+        "review_needed": review_needed,
+        "guardrail_override": should_guardrail_override_to_false(primary),
+        "profile_name": profile.get("name", scorecard.get("profile_name", "base")) if profile else scorecard.get("profile_name", "base"),
+        "reason": reason,
+        "routes": routes,
+    }
+
+
+def apply_profile_to_route_card(route_card: dict, profile: dict | None) -> dict:
+    if not profile:
+        return route_card
+
+    card = dict(route_card)
+    route = str(card.get("route", ""))
+    route_profile = (profile.get("routes") or {}).get(route, {})
+    if not route_profile:
+        card["profile_name"] = profile.get("name", "base")
+        return card
+
+    true_score = int(card.get("true_score", 0)) + int(route_profile.get("true_bonus", 0))
+    false_score = int(card.get("false_score", 0)) + int(route_profile.get("false_bonus", 0))
+    true_signals = list(card.get("true_signals", []))
+    false_signals = list(card.get("false_signals", []))
+
+    true_score += apply_signal_bonuses(true_signals, route_profile.get("true_signal_bonuses", []), true_signals)
+    false_score += apply_signal_bonuses(false_signals, route_profile.get("false_signal_bonuses", []), false_signals)
+    true_score = max(0, true_score)
+    false_score = max(0, false_score)
+
+    true_threshold = int(route_profile.get("true_threshold", profile.get("true_threshold", 5)))
+    true_margin = int(route_profile.get("true_margin", profile.get("true_margin", 2)))
+    false_threshold = int(route_profile.get("false_threshold", profile.get("false_threshold", 5)))
+    false_margin = int(route_profile.get("false_margin", profile.get("false_margin", 2)))
+
+    margin = true_score - false_score
+    if true_score >= true_threshold and margin >= true_margin:
+        recommendation = JIN
+        reason = "프로필 적용 후 진성 신호가 가성 제외조건보다 강함"
+    elif false_score >= false_threshold and margin <= -false_margin:
+        recommendation = GA
+        reason = "프로필 적용 후 명확한 가성 제외조건이 진성 신호보다 강함"
+    else:
+        recommendation = REVIEW
+        reason = "프로필 적용 후 진성/가성 신호가 혼재하거나 점수 차이가 작음"
+
+    card.update(
+        {
+            "true_score": true_score,
+            "false_score": false_score,
+            "margin": margin,
+            "recommendation": recommendation,
+            "review_needed": recommendation == REVIEW and bool(card.get("triggered", False)),
+            "reason": reason,
+            "true_signals": true_signals,
+            "false_signals": false_signals,
+            "profile_name": profile.get("name", "base"),
+            "guardrail_min_false_score": int(
+                route_profile.get("guardrail_min_false_score", profile.get("guardrail_min_false_score", 6))
+            ),
+            "guardrail_min_margin": int(route_profile.get("guardrail_min_margin", profile.get("guardrail_min_margin", 3))),
+        }
+    )
+    return card
+
+
+def apply_signal_bonuses(source_signals: list[str], bonuses: list[dict], output_signals: list[str]) -> int:
+    total = 0
+    text = "\n".join(source_signals).lower()
+    for bonus in bonuses or []:
+        terms = bonus.get("contains", [])
+        if isinstance(terms, str):
+            terms = [terms]
+        if not terms:
+            continue
+        if any(str(term).lower() in text for term in terms):
+            score = int(bonus.get("score", 0))
+            if score:
+                total += score
+                output_signals.append(f"{score:+d} profile:{bonus.get('reason', 'signal bonus')}")
+    return total
+
+
 def should_guardrail_override_to_false(route_card: dict) -> bool:
     if route_card.get("recommendation") != GA:
         return False
@@ -256,7 +413,9 @@ def should_guardrail_override_to_false(route_card: dict) -> bool:
             "단순 시정",
         ],
     )
-    return has_hard_guardrail and false_score >= 6 and false_score >= true_score + 3
+    min_false_score = int(route_card.get("guardrail_min_false_score", 6))
+    min_margin = int(route_card.get("guardrail_min_margin", 3))
+    return has_hard_guardrail and false_score >= min_false_score and false_score >= true_score + min_margin
 
 
 def score_adder(prefix: str, signals: list[str]):

@@ -13,6 +13,7 @@ from .evaluate import evaluate_policy
 from .llm_factory import create_llm
 from .llm_json import configure_llm_runtime
 from .policy import load_policy, make_policy_diff, save_policy, should_promote, validate_candidate_policy
+from .route_score_evolution import run_route_score_evolution, save_promoted_profile
 from .route_tuning import run_guardrail_autotune
 from .sampling import build_train_validation_dfs
 
@@ -236,6 +237,16 @@ def run_route_score_sweep_cycle(
             )
             if autotune_result:
                 mode_results.append(autotune_result)
+
+        if config.getboolean("runtime", "route_score_evolve", fallback=True):
+            evolution_result = maybe_run_route_score_evolution(
+                config=config,
+                run_dir=run_dir,
+                mode_results=mode_results,
+                cycle=cycle,
+            )
+            if evolution_result:
+                mode_results.append(evolution_result)
     finally:
         config.set("runtime", "route_score_mode", original_mode)
 
@@ -323,6 +334,83 @@ def maybe_run_route_score_autotune(config: Any, run_dir: Path, mode_results: lis
         "autotune_candidate": best["candidate"],
         "autotune_train_delta": best["train_delta"],
         "autotune_validation_delta": best["validation_delta"],
+    }
+
+
+def maybe_run_route_score_evolution(config: Any, run_dir: Path, mode_results: list[dict], cycle: int) -> dict | None:
+    record = next((item for item in mode_results if item.get("mode") == "record"), None)
+    if not record:
+        print(f"[cycle {cycle}] route_score evolution skipped: record mode result not found", flush=True)
+        return None
+
+    train_path = Path(record["train_predictions_path"])
+    validation_path = Path(record["validation_predictions_path"])
+    if not train_path.exists() or not validation_path.exists():
+        print(f"[cycle {cycle}] route_score evolution skipped: record prediction files not found", flush=True)
+        return None
+
+    print(f"[cycle {cycle}] route_score evolution: testing scorecard profile candidates", flush=True)
+    train_pred_df = pd.read_csv(train_path)
+    validation_pred_df = pd.read_csv(validation_path)
+    evolution = run_route_score_evolution(train_pred_df, validation_pred_df, config)
+    best = evolution["best"]
+
+    evolve_dir = run_dir / "route_score_evolved_profile"
+    evolve_dir.mkdir(parents=True, exist_ok=True)
+    save_predictions(evolve_dir / "train_predictions.csv", best["train_predictions"])
+    save_predictions(evolve_dir / "validation_predictions.csv", best["validation_predictions"])
+    save_json(evolve_dir / "train_metrics.json", best["train_metrics"])
+    save_json(evolve_dir / "validation_metrics.json", best["validation_metrics"])
+    save_json(
+        evolve_dir / "selected_profile.json",
+        {
+            "candidate": best["candidate"],
+            "train_delta": best["train_delta"],
+            "validation_delta": best["validation_delta"],
+            "summary_row": best["summary_row"],
+        },
+    )
+    pd.DataFrame(evolution["candidates"]).to_csv(evolve_dir / "profile_candidates.csv", index=False, encoding="utf-8-sig")
+
+    promoted = bool(best["summary_row"].get("validation_gate")) and best["candidate"].get("name") != "route_profile_noop"
+    profile_path = None
+    if promoted and config.getboolean("runtime", "route_score_evolve_save_profile", fallback=True):
+        profile_path = save_promoted_profile(
+            config,
+            best["candidate"].get("profile", {}),
+            {
+                "cycle": cycle,
+                "run_dir": str(run_dir),
+                "candidate_name": best["candidate"].get("name"),
+                "train_delta": best["train_delta"],
+                "validation_delta": best["validation_delta"],
+                "summary_row": best["summary_row"],
+            },
+        )
+        (evolve_dir / "PROMOTED_PROFILE.txt").write_text(str(profile_path), encoding="utf-8")
+
+    metrics = best["validation_metrics"]
+    print(
+        f"[cycle {cycle}] route_score evolved_profile "
+        f"candidate={best['candidate'].get('name')} promoted={promoted} "
+        f"validation acc={metrics.get('accuracy', 0):.4f} "
+        f"score={metrics.get('score', 0):.4f} "
+        f"TR={metrics.get('true_recall', 0):.4f} "
+        f"TP={metrics.get('true_precision', 0):.4f}",
+        flush=True,
+    )
+
+    return {
+        "mode": "evolved_profile",
+        "train_metrics": best["train_metrics"],
+        "validation_metrics": best["validation_metrics"],
+        "train_predictions_path": str(evolve_dir / "train_predictions.csv"),
+        "validation_predictions_path": str(evolve_dir / "validation_predictions.csv"),
+        "evolved_profile_candidate": best["candidate"],
+        "evolved_profile_promoted": promoted,
+        "evolved_profile_path": str(profile_path) if profile_path else "",
+        "evolved_profile_train_delta": best["train_delta"],
+        "evolved_profile_validation_delta": best["validation_delta"],
     }
 
 

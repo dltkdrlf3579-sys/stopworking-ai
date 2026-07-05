@@ -9,6 +9,7 @@ import pandas as pd
 from .case_prepare import row_to_case
 from .judge import judge_case
 from .llm_json import configure_llm_runtime
+from .route_score import configure_route_score_profile_from_config
 
 
 def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label: str = "policy") -> tuple[pd.DataFrame, dict]:
@@ -25,13 +26,15 @@ def evaluate_policy(df: pd.DataFrame, llm: Any, config: Any, policy: str, label:
         max_attempts=config.getint("runtime", "llm_max_attempts", fallback=20),
         log_rate_limit_waits=config.getboolean("runtime", "llm_log_rate_limit_waits", fallback=False),
     )
+    active_profile = configure_route_score_profile_from_config(config)
 
     records = list(df.to_dict("records"))
     results: list[dict] = []
     total = len(records)
 
     print(
-        f"[{label}] start: rows={total}, mode={mode}, max_workers={max_workers}",
+        f"[{label}] start: rows={total}, mode={mode}, max_workers={max_workers}, "
+        f"route_profile={active_profile.get('name', 'base') if active_profile else 'base'}",
         flush=True,
     )
 
