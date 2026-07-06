@@ -251,7 +251,7 @@ def build_profile_candidates(config: Any, train_pred_df: pd.DataFrame, current_p
                     },
                     "leak_contact": {
                         "false_signal_bonuses": [
-                            {"contains": ["당시 무해성"], "score": 2, "reason": "당시 DIW/응축수/테스트 명확 방어 강화"},
+                            {"contains": ["당시 무해성"], "score": 2, "reason": "당시 DIW/일반 물/테스트 명확 방어 강화"},
                             {"contains": ["활성 위험 없음"], "score": 1, "reason": "실제 노출/활성위험 없음 방어 강화"},
                             {"contains": ["단순 청소"], "score": 1, "reason": "단순 청소/배수 방어 강화"},
                         ],

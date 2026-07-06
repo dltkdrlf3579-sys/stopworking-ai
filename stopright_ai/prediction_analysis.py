@@ -1238,8 +1238,10 @@ def is_leak_contact_focus_row(row: pd.Series) -> bool:
 
 
 def assign_leak_contact_subtype(text: str) -> str:
-    if matched_keywords(text, ["응축수", "DIW", "물", "무해", "청소", "배수", "닦"], 1):
-        return "harmless_water_or_condensate"
+    if matched_keywords(text, ["응축수"], 1) and not matched_keywords(text, ["무해", "단순 결로", "일반 결로", "당시 무해"], 1):
+        return "condensate_identity_uncertainty"
+    if matched_keywords(text, ["DIW", "물", "무해", "단순 결로", "일반 결로", "청소", "배수", "닦"], 1):
+        return "harmless_water_or_simple_cleanup"
     if matched_keywords(text, ["미상", "성분", "냄새", "약품", "화학", "폐액"], 1):
         return "unknown_material_or_chemical_uncertainty"
     if matched_keywords(text, ["접촉", "접액", "흡입", "노출", "보호구"], 1):
@@ -1430,7 +1432,7 @@ def build_leak_contact_report(bundle: dict[str, Any], paths: dict[str, Path]) ->
             "",
             "1. Open `leak_contact_fn.csv` and `leak_contact_fp.csv` side by side.",
             "2. Paste `leak_contact_llm_prompt.md` into the internal LLM for a focused diagnosis.",
-            "3. Only accept a new policy sentence if it catches repeated FN while clearly excluding DIW/condensate/simple-cleanup FP clusters.",
+            "3. Only accept a new policy sentence if it catches repeated FN while clearly excluding DIW/confirmed-harmless-water/simple-cleanup FP clusters. Do not treat condensate as harmless unless it was confirmed harmless at stop time.",
         ]
     )
     return "\n".join(lines) + "\n"
