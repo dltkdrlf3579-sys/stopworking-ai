@@ -78,6 +78,11 @@ def configure_llm_runtime_from_config(config: Any) -> None:
             "llm_max_attempts",
             fallback=config.getint("runtime", "llm_max_attempts", fallback=20),
         ),
+        json_parse_retries=config.getint(
+            "daily_prediction",
+            "llm_json_parse_retries",
+            fallback=config.getint("runtime", "llm_json_parse_retries", fallback=1),
+        ),
         log_rate_limit_waits=config.getboolean(
             "daily_prediction",
             "llm_log_rate_limit_waits",

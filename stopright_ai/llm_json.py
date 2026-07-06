@@ -13,6 +13,7 @@ class LlmRuntimeConfig:
         self.calls_per_minute = 25
         self.retry_wait_seconds = 300
         self.max_attempts = 20
+        self.json_parse_retries = 1
         self.log_rate_limit_waits = False
         self.rate_limiter = RateLimiter(self.calls_per_minute, 60)
 
@@ -59,11 +60,13 @@ def configure_llm_runtime(
     calls_per_minute: int = 25,
     retry_wait_seconds: int = 300,
     max_attempts: int = 20,
+    json_parse_retries: int = 1,
     log_rate_limit_waits: bool = False,
 ) -> None:
     _RUNTIME.calls_per_minute = max(1, int(calls_per_minute))
     _RUNTIME.retry_wait_seconds = max(1, int(retry_wait_seconds))
     _RUNTIME.max_attempts = max(1, int(max_attempts))
+    _RUNTIME.json_parse_retries = max(0, int(json_parse_retries))
     _RUNTIME.log_rate_limit_waits = bool(log_rate_limit_waits)
     _RUNTIME.rate_limiter.update(_RUNTIME.calls_per_minute, 60)
 
@@ -166,7 +169,50 @@ def is_retryable_llm_error(exc: Exception) -> bool:
 
 def invoke_json(llm: Any, system: str, user: str, images: list[str] | None = None) -> dict:
     text = invoke_text(llm, system, user, images=images)
-    return parse_json_object(text)
+    try:
+        return parse_json_object(text)
+    except ValueError as exc:
+        last_exc: ValueError = exc
+
+    for attempt in range(1, _RUNTIME.json_parse_retries + 1):
+        print(
+            f"[json-retry] attempt={attempt}/{_RUNTIME.json_parse_retries} "
+            f"error={summarize_exception(last_exc)}",
+            flush=True,
+        )
+        retry_text = invoke_text(
+            llm,
+            system + JSON_RETRY_SYSTEM_SUFFIX,
+            user + JSON_RETRY_USER_SUFFIX,
+            images=images,
+        )
+        try:
+            return parse_json_object(retry_text)
+        except ValueError as exc:
+            last_exc = exc
+
+    raise last_exc
+
+
+def summarize_exception(exc: Exception) -> str:
+    return str(exc).splitlines()[0]
+
+
+JSON_RETRY_SYSTEM_SUFFIX = """
+
+[JSON 파싱 실패 재시도 지시]
+이전 응답은 JSON 파싱에 실패했다.
+반드시 JSON 객체 하나만 출력한다.
+JSON 앞뒤에 설명, 마크다운 코드블록, 추가 문장, 두 번째 JSON을 절대 붙이지 않는다.
+첫 글자는 { 이고 마지막 글자는 } 이어야 한다.
+"""
+
+
+JSON_RETRY_USER_SUFFIX = """
+
+위 입력에 대해 다시 응답하라.
+이번 응답은 JSON 객체 하나만 출력하고, JSON 외 텍스트는 출력하지 않는다.
+"""
 
 
 def parse_json_object(text: str) -> dict:
