@@ -222,27 +222,25 @@ def score_leak_contact_route(text: str, profile: dict | None = None) -> dict:
     add_true = score_adder("true", true_signals)
     add_false = score_adder("false", false_signals)
 
-    if has_any(text, ["미상", "성분 미상", "정체불명", "확인 필요", "성분 확인", "화학물질 가능", "케미컬", "약품", "유해"]):
-        true_score += add_true(3, "작업중지 당시 성분 또는 위험성 미상")
-    if has_any(text, ["응축수"]) and not has_any(text, ["무해성이 명확", "단순 결로", "일반 결로", "당시 무해"]):
-        true_score += add_true(2, "응축수는 신원 확인 전 미상 액체 가능성")
+    if has_any(text, ["액체", "물", "누수", "누출", "응축수", "냄새", "가스", "약품 흔적", "접액"]):
+        true_score += add_true(3, "작업 중 실제 물질 또는 접액 우려 발견")
+    if has_any(text, ["미상", "성분 미상", "정체불명", "확인 필요", "성분 확인", "화학물질 가능", "케미컬", "약품", "유해", "안전성", "확신"]):
+        true_score += add_true(2, "작업중지 당시 안전성 불확실성")
     if has_any(text, ["접액", "접촉", "흡입", "노출", "냄새", "비산", "작업자 노출"]):
         true_score += add_true(2, "작업자 접촉·흡입·노출 가능성")
-    if has_any(text, ["누출원 확인", "원인 확인", "차단", "격리", "방제", "환기", "가스측정", "ert", "신고", "현장 이탈", "대피", "전문 조치", "성분 분석"]):
+    if has_any(text, ["운영부서", "담당부서", "유선전달", "전달", "확인 후 재개", "재개승인", "누출원 확인", "원인 확인", "차단", "격리", "방제", "환기", "가스측정", "ert", "신고", "현장 이탈", "대피", "전문 조치", "성분 분석"]):
         true_score += add_true(3, "확인·차단·격리·방제 등 전문 조치 필요")
     if has_any(text, ["화재", "폭발", "감전", "질식", "미끄러짐", "추가 누출", "설비 손상", "분출", "활성 누출"]):
         true_score += add_true(2, "구체적 2차 위험")
     if has_any(text, ["사후", "이후", "추후"]) and has_any(text, ["diw", "응축수", "물", "무해"]):
         true_score += add_true(2, "사후 무해 확인이나 당시 불확실성 가능성")
 
-    if has_any(text, ["작업중지 당시 이미", "당시 이미", "이미 diw", "이미 물", "무해성이 명확", "무해성 확인", "단순 결로", "일반 결로", "응축수 무해성 명확", "센서 테스트", "sw 경고", "테스트 알람"]):
-        false_score += add_false(4, "작업중지 당시 무해성 또는 테스트 신호 명확")
-    elif has_any(text, ["diw", "물"]):
-        false_score += add_false(2, "DIW·물 신호")
+    if has_any(text, ["실제 액체 없음", "실제 물질 없음", "센서 테스트", "sw 경고", "테스트 알람", "계획정비 알람"]):
+        false_score += add_false(4, "실제 물질 없는 테스트·알람 신호")
     if has_any(text, ["실제 누출 없음", "누출 없음", "접촉 없음", "흡입 없음", "노출 없음", "단순 알람", "점검 수준"]):
         false_score += add_false(3, "실제 노출·활성 위험 없음")
-    if has_any(text, ["청소", "닦음", "배수", "소량", "관리기준 이내", "계획된", "유지보수", "예상된 반응", "단순 점검"]):
-        false_score += add_false(2, "단순 청소·배수·계획 유지보수로 통제")
+    if has_any(text, ["계획된", "유지보수", "예상된 반응", "단순 점검"]) and not has_any(text, ["액체", "누수", "누출", "응축수", "접액", "냄새"]):
+        false_score += add_false(2, "실제 물질 발견 없는 계획 유지보수·점검")
 
     card = finalize_route_card("leak_contact", triggered, true_score, false_score, true_signals, false_signals)
     return apply_profile_to_route_card(card, profile)
