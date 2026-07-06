@@ -64,6 +64,10 @@ def build_route_scorecard(case: dict, evidence: dict, profile: dict | None = Non
     if leak_card["triggered"]:
         route_cards.append(leak_card)
 
+    standard_card = score_standard_deviation_route(text, profile)
+    if standard_card["triggered"]:
+        route_cards.append(standard_card)
+
     if not route_cards:
         return {
             "primary_route": "general",
@@ -86,7 +90,7 @@ def build_route_scorecard(case: dict, evidence: dict, profile: dict | None = Non
     reason = primary["reason"]
     if conflicting_routes:
         recommendation = REVIEW
-        reason = "배관/접액 등 복수 특수 루트의 권고가 충돌함"
+        reason = "복수 특수 루트의 권고가 충돌함"
 
     return {
         "primary_route": primary["route"],
@@ -241,6 +245,48 @@ def score_leak_contact_route(text: str, profile: dict | None = None) -> dict:
         false_score += add_false(2, "단순 청소·배수·계획 유지보수로 통제")
 
     card = finalize_route_card("leak_contact", triggered, true_score, false_score, true_signals, false_signals)
+    return apply_profile_to_route_card(card, profile)
+
+
+def score_standard_deviation_route(text: str, profile: dict | None = None) -> dict:
+    true_score = 0
+    false_score = 0
+    true_signals: list[str] = []
+    false_signals: list[str] = []
+
+    route_terms = [
+        "지정 도구",
+        "특정 도구",
+        "지정 작업방법",
+        "대체 도구",
+        "다른 도구",
+        "대체 작업방법",
+        "규정위반",
+        "안전기준",
+        "손들기",
+    ]
+    triggered = has_any(text, route_terms)
+
+    add_true = score_adder("true", true_signals)
+    add_false = score_adder("false", false_signals)
+
+    if has_any(text, ["지정 도구", "특정 도구", "지정 작업방법", "안전기준", "규정", "표준"]):
+        true_score += add_true(2, "회사 지정 안전도구·작업방법 기준 존재")
+    if has_any(text, ["대체 도구", "다른 도구", "대체 작업방법", "방법 변경", "작업방법 변경"]):
+        true_score += add_true(2, "대체 도구·대체 방법 사용 필요")
+    if has_any(text, ["공간 협소", "협소", "간섭", "접근 불가", "작업환경", "컨디션"]):
+        true_score += add_true(2, "현장 조건 때문에 기준 준수 곤란")
+    if has_any(text, ["삼성전자", "ds", "sec", "담당부서", "시공그룹", "허락", "승인", "손들기", "협의"]):
+        true_score += add_true(2, "담당부서 허락·승인·협의 신호")
+
+    if has_any(text, ["일정 조율", "작업순서", "일반 허가", "허가서", "담당자 확인", "기간 연장"]):
+        false_score += add_false(3, "일반 행정·일정·허가 협의 신호")
+    if has_any(text, ["편의", "생산성", "효율", "공구 종류", "단순 방법 논의"]):
+        false_score += add_false(3, "안전기준 이탈보다 편의·생산성 목적 가능성")
+    if has_any(text, ["협력회사 자체", "자체 판단"]) and not has_any(text, ["삼성전자", "ds", "sec", "담당부서"]):
+        false_score += add_false(2, "담당부서 승인보다 협력회사 자체 판단")
+
+    card = finalize_route_card("standard_deviation", triggered, true_score, false_score, true_signals, false_signals)
     return apply_profile_to_route_card(card, profile)
 
 

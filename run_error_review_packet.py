@@ -250,6 +250,8 @@ def assign_bucket(row: pd.Series) -> str:
     text += " " + compact(get_nested(evidence, "leak_contact_evidence"), 2000)
 
     lowered = text.lower()
+    if any(token in text for token in ["지정 도구", "특정 도구", "대체 도구", "다른 도구", "대체 작업방법", "규정위반", "안전기준", "손들기"]):
+        return "standard_rule_deviation"
     if any(token in text for token in ["배관", "서포트", "밟", "발판", "Toxic Duct", "덕트"]):
         return "pipe_support_or_access"
     if any(token in text for token in ["누출", "접액", "DIW", "응축수", "미상", "냄새", "가스", "방제", "ERT"]):
