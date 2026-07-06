@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from .artifacts import append_hard_cases, make_run_dir, save_json, save_predictions
+from .artifacts import append_hard_cases, make_run_dir, save_error_slices, save_json, save_predictions
 from .errors import build_error_clusters, generate_candidate_policies
 from .evaluate import evaluate_policy
 from .llm_factory import create_llm
@@ -68,6 +68,7 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
 
     train_pred_df, train_base_metrics = evaluate_policy(train_df, llm, config, current_policy, label="train-baseline")
     save_predictions(run_dir / "train_baseline_predictions.csv", train_pred_df)
+    save_error_slices(run_dir, "train_baseline", train_pred_df)
     save_json(run_dir / "train_baseline_metrics.json", train_base_metrics)
     append_hard_cases(config, train_pred_df)
 
@@ -93,6 +94,7 @@ def run_one_cycle(df: pd.DataFrame, config: Any, llm: Any, cycle: int = 1) -> di
         label="validation-baseline",
     )
     save_predictions(run_dir / "validation_baseline_predictions.csv", validation_base_pred_df)
+    save_error_slices(run_dir, "validation_baseline", validation_base_pred_df)
     save_json(run_dir / "validation_baseline_metrics.json", validation_base_metrics)
 
     winner = {

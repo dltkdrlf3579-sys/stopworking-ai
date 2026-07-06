@@ -114,6 +114,11 @@ def normalize_decision(
         "major": case.get("major", ""),
         "middle": case.get("middle", ""),
         "title": case.get("title", ""),
+        "phenomenon_truncated": case.get("phenomenon_truncated", False),
+        "action_truncated": case.get("action_truncated", False),
+        "image_count": case.get("image_count", 0),
+        "original_image_count": case.get("original_image_count", case.get("image_count", 0)),
+        "omitted_image_count": case.get("omitted_image_count", 0),
     }
     if apply_guardrail:
         return apply_route_guardrail(result)
@@ -146,6 +151,11 @@ def invalid_decision(case: dict, evidence: dict, final: dict, reason: str) -> di
         "major": case.get("major", ""),
         "middle": case.get("middle", ""),
         "title": case.get("title", ""),
+        "phenomenon_truncated": case.get("phenomenon_truncated", False),
+        "action_truncated": case.get("action_truncated", False),
+        "image_count": case.get("image_count", 0),
+        "original_image_count": case.get("original_image_count", case.get("image_count", 0)),
+        "omitted_image_count": case.get("omitted_image_count", 0),
         "error": reason,
         "exclude_from_metrics": True,
     }

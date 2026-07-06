@@ -28,6 +28,27 @@ def save_predictions(path: Path, pred_df: pd.DataFrame) -> None:
     safe_df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
+def save_error_slices(run_dir: Path, prefix: str, pred_df: pd.DataFrame) -> None:
+    eval_df = pred_df.copy()
+    excluded = eval_df.get("exclude_from_metrics", False)
+    if isinstance(excluded, pd.Series):
+        eval_df = eval_df[~excluded.map(_normalize_bool)].copy()
+
+    if eval_df.empty or not {"label", "pred", "correct"}.issubset(eval_df.columns):
+        save_predictions(run_dir / f"{prefix}_errors.csv", eval_df.iloc[0:0])
+        save_predictions(run_dir / f"{prefix}_fn.csv", eval_df.iloc[0:0])
+        save_predictions(run_dir / f"{prefix}_fperr.csv", eval_df.iloc[0:0])
+        return
+
+    errors = eval_df[eval_df["correct"] == False].copy()
+    fn = eval_df[(eval_df["label"] == "진성") & (eval_df["pred"] == "가성")].copy()
+    fperr = eval_df[(eval_df["label"] == "가성") & (eval_df["pred"] == "진성")].copy()
+
+    save_predictions(run_dir / f"{prefix}_errors.csv", errors)
+    save_predictions(run_dir / f"{prefix}_fn.csv", fn)
+    save_predictions(run_dir / f"{prefix}_fperr.csv", fperr)
+
+
 def append_hard_cases(config: Any, pred_df: pd.DataFrame) -> None:
     hard_path = Path(config.get("artifacts", "hard_cases_path", fallback="artifacts/hard_cases.csv"))
     hard_path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,3 +81,17 @@ def append_hard_cases(config: Any, pred_df: pd.DataFrame) -> None:
         hard = pd.concat([old, hard], ignore_index=True).drop_duplicates()
 
     hard.to_csv(hard_path, index=False, encoding="utf-8-sig")
+
+
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y"}:
+            return True
+        if text in {"false", "0", "no", "n", ""}:
+            return False
+    if pd.isna(value):
+        return False
+    return bool(value)
