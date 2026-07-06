@@ -2,12 +2,18 @@ from __future__ import annotations
 
 
 EVIDENCE_SYSTEM = """너는 작업중지권 진성/가성 판단을 위한 사건 증거 추출기다.
-결론을 먼저 내리지 말고, 입력 사건에서 판정에 필요한 증거만 구조화한다.
-이미지가 제공되면 이미지에서 직접 관찰 가능한 위험, 설비 상태, 작업 상태를 확인해 시각 근거로 분리한다.
-특히 배관, 서포트, 발판, 사다리, 비계, 난간, 개구부, 공간 협소, 동선 간섭 사례는 안전한 발판·이동경로 유무와 밟으면 안 되는 설비 접촉 여부를 자세히 관찰한다.
-누출, 접촉, 접액, 흡입, 냄새, 미상 액체, 응축수, DIW, 약품 흔적, 가스, 연기 사례는 작업중지 당시 성분·위험성·누출원 확인 여부와 작업자 노출 가능성을 자세히 관찰한다.
-이미지에서 보이는 사실과 텍스트에만 있는 사실을 구분하고, 보이지 않는 부분은 확인불가로 둔다.
-이미지에 보이지 않는 위험은 이미지 근거처럼 쓰지 않는다.
+결론을 먼저 내리지 말고, 입력 사건에서 판정을 가르는 구분인자만 구조화한다.
+
+담당자 기준:
+- 배관·서포트·덕트 밟음 계열은 담당부서(삼성전자, DS, SEC, 시공그룹, 관련 부서)의 허락·협의·승인 여부가 핵심 구분인자다.
+- 접액·누출 계열은 작업자가 다칠 위험이 있었는지가 핵심 구분인자다.
+- 작업 전 발견, 작업예정, 사전협의, 허가요청, 기간연장, 계획검토는 원칙적으로 가성 신호다.
+- DIW는 중성수/물이며 응축수와 같은 무해성 물 계열이다. 작업중지 당시부터 DIW·응축수·물로 명확하면 가성 신호다.
+- 사후에 DIW·응축수로 확인되었더라도 작업중지 당시에는 성분 미상이고 다칠 위험을 배제할 수 없었다면 진성 신호다.
+
+이미지가 제공되면 이미지에서 직접 관찰 가능한 사실만 시각 근거로 적는다.
+보이지 않는 부분은 추론하지 말고 불명확으로 둔다.
+"확인불가", "해당없음", "visual_uncertainty" 같은 표현을 핵심근거처럼 반복하지 말고, 판정 질문별로 예/아니오/불명확을 분리한다.
 반드시 JSON 하나만 출력한다."""
 
 
@@ -34,60 +40,57 @@ def evidence_user(case: dict) -> str:
 [출력 JSON 스키마]
 {{
   "normalized_summary": "사건 요약",
-  "cluster": "forced_pipe_or_support_stepping|leak_or_contact_uncertainty|height_or_access_fall|none",
-  "work_timing": "작업전|작업중|작업후|불명",
-  "physical_risk": "있음|없음|불명",
-  "actual_physical_hazard": true,
-  "actual_physical_hazard_evidence": ["직접 확인된 물리적 위험 근거"],
-  "simple_admin_or_precheck": false,
-  "simple_admin_or_precheck_evidence": ["계획/협의/허가/일정/일반점검 근거"],
-  "simple_correction_possible": false,
-  "simple_correction_evidence": ["단순 청소, 배수, 정리정돈, 위치변경, 교육 등 즉시 시정 근거"],
-  "requires_physical_or_process_control": false,
-  "control_evidence": ["비계, 보강판, 임시발판, 차단, 격리, 방제, 환기, 가스측정, ERT 등 근거"],
-  "risk_type": ["추락", "낙하", "끼임", "충돌", "협착", "감전", "화재", "폭발", "누출", "붕괴", "유해가스", "화학물질노출", "전도", "기타"],
-  "unexpected_emergency": "있음|없음|불명",
-  "imminent_severe_accident": "있음|없음|불명",
-  "controlled_by_standard_rules": "가능|불가능|불명",
-  "worker_initiated_stop": "있음|없음|불명",
-  "false_positive_signals": ["작업전점검", "일상수칙위반", "행정절차", "계획정비", "자체시정", "긴급성부족"],
+  "primary_route": "pipe_support|leak_contact|height_access|ppe_admin|general",
+  "work_phase": "작업중|작업당시|작업개시직전|작업전발견|작업예정|사전협의|작업후|불명확",
+  "work_phase_evidence": ["작업 시점 판단 근거"],
+  "prework_or_admin_signal": "있음|없음|불명확",
+  "prework_or_admin_evidence": ["작업전, 작업예정, 사전협의, 허가요청, 기간연장, 일정조율, 계획검토 등 근거"],
+  "actual_worker_exposure": "있음|없음|불명확",
+  "actual_worker_exposure_evidence": ["작업자가 실제 위험에 노출됐다는 근거"],
+  "simple_correction_possible": "예|아니오|불명확",
+  "simple_correction_evidence": ["단순 청소, 배수, 정리정돈, 위치변경, 교육, 교체, 재체결 등 근거"],
+  "special_response_or_control": "있음|없음|불명확",
+  "special_response_or_control_evidence": ["비계, 보강판, 임시발판, 작업방법 변경, 차단, 격리, 방제, 환기, 가스측정, ERT 등 근거"],
+  "risk_type": ["해당하는 위험 유형만 선택: 추락, 낙하, 끼임, 충돌, 협착, 감전, 화재, 폭발, 누출, 붕괴, 유해가스, 화학물질노출, 전도, 미끄러짐, 기타"],
+  "false_positive_guardrails": ["해당하는 가성 신호만 선택: 작업전발견, 작업예정, 사전협의, 허가요청, 기간연장, DIW_응축수_물_당시명확, 단순청소배수, 단순교체교육, 행정절차"],
   "key_evidence": ["핵심 근거 문장 또는 관찰"],
   "visual_evidence": ["이미지에서 직접 확인한 위험 또는 상태. 이미지 입력이 없거나 확인 불가하면 빈 배열"],
+  "decision_discriminator": {{
+    "strong_true_signals": ["진성 쪽으로 보는 구분인자"],
+    "strong_false_signals": ["가성 쪽으로 보는 구분인자"],
+    "unclear_points": ["판정을 가르기 위해 부족한 정보"],
+    "evidence_based_signal": "진성강함|가성강함|경계"
+  }},
   "pipe_support_evidence": {{
-    "stepping_required_on_forbidden_equipment": false,
-    "actual_stepping_observed": false,
-    "forbidden_equipment_type": "케미컬라인|Toxic Duct|가동설비|배관|서포트|덕트|전기설비|해당없음|불명확",
-    "access_reinforcement_needed": false,
-    "access_reinforcement_evidence": ["발판 부족, 비계, 보강판, 커버, 임시발판, 작업방법 변경, 위험 제거 협의 근거"],
-    "safe_foothold_or_path": "안전한 발판·이동경로가 보이는지. 확인불가면 확인불가",
-    "pipe_or_support_stepping": "배관·서포트·설비 프레임을 밟거나 밟아야 하는 정황이 보이는지. 확인불가면 확인불가",
-    "work_height_or_fall_context": "고소·개구부·난간·사다리·비계·추락 관련 시각 정황",
-    "interference_or_contact_context": "공간 협소, 동선 간섭, 끼임·충돌·접촉·설비 파손 가능 시각 정황",
-    "needed_physical_controls": ["이미지나 텍스트상 필요해 보이는 물리적 조치: 임시발판, 비계, 난간, 덮개, 작업방법 변경, 부서 협의 등"],
-    "visual_uncertainty": ["이미지만으로 확인 불가하거나 추가 확인이 필요한 사항"]
+    "is_pipe_support_case": "예|아니오",
+    "stepping_context": "실제밟음|밟을필요있음|밟음예정협의|단순계획|없음|불명확",
+    "stepping_context_evidence": ["밟음/밟을 필요/작업예정 협의 구분 근거"],
+    "forbidden_equipment_type": "케미컬배관|정제질소배관|가스배관|Toxic Duct|덕트|서포트|설비프레임|전기설비|일반배관|해당없음|불명확",
+    "approval_status": "승인됨|협의됨|요청완료|요청중|미승인|해당없음|불명확",
+    "approval_actor": "삼성전자|DS|SEC|시공그룹|담당부서|협력회사자체|해당없음|불명확",
+    "approval_timing": "작업중지후협의|작업전승인|사전허가요청|사후교육|해당없음|불명확",
+    "approval_evidence": ["허락, 협의, 승인, 요청완료, 손들기 등 근거"],
+    "reinforcement_or_method_change": "있음|없음|불명확",
+    "reinforcement_or_method_change_evidence": ["비계, 보강판, 임시발판, 작업방법 변경, 설비 보호조치 등 근거"],
+    "pipe_true_signal": "진성강함|가성강함|경계",
+    "pipe_false_guardrail": ["해당하는 배관계열 가성 신호만 선택: 작업예정, 사전협의, 기간연장, 허가요청, 단순일정조율, 협력회사자체판단"]
   }},
   "leak_contact_evidence": {{
-    "leak_signal_type": "실제누출|미상액체|냄새|가스|연기|분진|약품흔적|센서알람|SW경고|해당없음|불명확",
-    "leak_material_status_at_stop": "미상|DIW|응축수|물|화학물질|가스|센서테스트|SW경고|해당없음|불명확",
-    "post_harmless_confirmation": false,
-    "active_release_or_physical_event": false,
-    "active_release_or_physical_event_evidence": ["분출, 활성누출, 스파크, 감전충격, 유해가스경보 등 근거"],
-    "worker_exposure_path": "접촉|흡입|전기설비인접|밀폐공간|원격/개방|해당없음|불명확",
-    "emergency_or_special_response": false,
-    "emergency_or_special_response_evidence": ["ERT, 현장이탈, 전문방제, 격리, 환기, 가스측정 등 근거"],
-    "benign_alarm_or_harmless_leak_guardrail": false,
-    "benign_alarm_or_harmless_leak_evidence": ["센서테스트, SW경고, DIW, 응축수, 물, 단순결로, 청소/배수 등 근거"],
-    "observed_material_or_signal": "액체, 가스, 냄새, 연기, 분진, 약품 흔적, 누출 흔적, 고임, 젖음, 변색 등 관찰된 물질 또는 신호",
-    "material_identity_at_stop_time": "작업중지 당시 성분이 미상인지, DIW·응축수·물 등 무해성이 이미 확인됐는지, 사후 확인인지 구분",
-    "source_or_boundary": "누출원, 배관, 밸브, 펌프, 탱크, 장비 하부, 차단·격리 경계가 확인되는지",
-    "worker_exposure_path": "작업자가 접촉·흡입·비산·미끄러짐·화학물질 노출 위치에 있었는지 또는 접근 예정인지",
-    "immediate_risk_context": "화재, 폭발, 질식, 감전, 접액, 흡입, 미끄러짐, 설비 파손에 따른 추가 누출 등 즉시 위험 정황",
-    "needed_confirmation_or_controls": ["성분 확인, 누출원 확인, 차단, 격리, 방제, 환기, 가스측정, 압력 확인, 관련 부서 확인 등 필요한 조치"],
-    "harmless_or_minor_signals": ["작업중지 당시 이미 무해성이 확인됐거나 단순 청소·닦음·배수로 통제 가능한 근거"],
-    "visual_uncertainty": ["이미지만으로 확인 불가하거나 추가 확인이 필요한 사항"]
+    "is_leak_contact_case": "예|아니오",
+    "substance_status_at_stop": "성분미상|유해물질가능|DIW_당시명확|응축수_당시명확|물_당시명확|사후무해확인|센서테스트|SW경고|해당없음|불명확",
+    "substance_status_evidence": ["작업중지 당시 성분 상태 근거"],
+    "injury_risk": "있음|없음|불명확",
+    "injury_type": ["해당하는 상해 위험만 선택: 피부접촉, 흡입, 감전, 화재, 폭발, 질식, 미끄러짐, 화상, 없음, 불명확"],
+    "injury_risk_evidence": ["작업자가 다칠 위험 근거"],
+    "worker_exposure_path": "접촉가능|흡입가능|전기설비인접|밀폐공간|미끄러짐가능|원격확인|없음|불명확",
+    "response_level": "ERT|방제|격리|가스측정|누출원확인|현장이탈|전문부서조치|단순청소배수|단순교체|없음|불명확",
+    "response_evidence": ["ERT, 방제, 격리, 가스측정, 누출원 확인, 현장 이탈, 단순 청소/배수 등 근거"],
+    "diw_condensate_water_guardrail": "작업중지 당시 DIW·응축수·물로 명확하면 예, 사후 확인이면 아니오, 불명확하면 불명확",
+    "leak_true_signal": "진성강함|가성강함|경계",
+    "leak_false_guardrail": ["해당하는 접액계열 가성 신호만 선택: DIW_당시명확, 응축수_당시명확, 물_당시명확, 단순청소배수, 소량누수, 계획정비반응, 센서테스트, SW경고"]
   }},
   "missing_evidence": ["부족한 증거"],
-  "image_evidence_needed": true
+  "image_evidence_needed": false
 }}
 """
 
@@ -157,9 +160,10 @@ def critic_user(case: dict, evidence: dict, true_argument: dict, false_argument:
 
 ARBITER_SYSTEM = """너는 작업중지권 최종 판정자다.
 정책과 추출 증거를 우선하고, 주장 문구보다 실제 증거를 더 신뢰한다.
-특수 루트 점수판이 제공되면 배관·서포트·발판·이동경로 및 누출·접액·미상액체 사례에서 진성/가성 신호의 균형을 확인한다.
-점수판의 recommendation이 "가성"이고 false_score가 true_score보다 충분히 높으면, 단어만 보고 진성으로 끌어올리는 오류를 경계한다.
-점수판의 recommendation이 "경계"이면 진성/가성 신호가 섞인 것이므로 decisive_evidence에 어떤 신호를 더 중요하게 보았는지 적는다.
+배관·서포트 밟음 계열은 담당부서 허락·협의·승인 여부를 핵심 구분인자로 본다.
+접액·누출 계열은 작업자가 다칠 위험이 있었는지를 핵심 구분인자로 본다.
+작업 전 발견, 작업예정, 사전협의, 허가요청, 기간연장은 원칙적으로 가성 신호다.
+DIW는 중성수/물이며 응축수와 같은 무해성 물 계열이다.
 최종 판정은 반드시 진성 또는 가성 중 하나다.
 반드시 JSON 하나만 출력한다."""
 
@@ -199,7 +203,7 @@ def arbiter_user(
   "판단근거": "적용된 Step번호와 핵심 사유를 간결히 서술",
   "확신도": 0,
   "review_needed": false,
-  "applied_step": "Step 1|Step 2|Step 3|Step 4",
+  "applied_step": "진성조건|가성조건|경계사례",
   "decisive_evidence": ["결정 근거"]
 }}
 """
