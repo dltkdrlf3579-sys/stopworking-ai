@@ -36,6 +36,14 @@ def judge_case(
             trace=trace,
             route_score_mode=route_score_mode,
         )
+    if normalized_mode in {"true_confirm", "confirm_true", "double_true", "true_2of2"}:
+        return judge_case_true_confirm(
+            case=case,
+            llm=llm,
+            policy=policy,
+            trace=trace,
+            route_score_mode=route_score_mode,
+        )
 
     return judge_case_once(
         case=case,
@@ -181,6 +189,74 @@ def attach_vote_metadata(result: dict, votes: list[dict]) -> dict:
 
     base_reason = str(result.get("reason", "")).strip()
     vote_line = f"[stable_vote] {summary}"
+    result["reason"] = f"{base_reason}\n{vote_line}" if base_reason else vote_line
+    result["correct"] = result.get("pred") == result.get("label", "")
+    return result
+
+
+def judge_case_true_confirm(
+    case: dict,
+    llm: Any,
+    policy: str,
+    trace: bool = False,
+    route_score_mode: str = "record",
+) -> dict:
+    trace_id = str(case.get("id", ""))
+    started = time.monotonic()
+    trace_log(trace, trace_id, "true-confirm start")
+
+    first = judge_case_once(case, llm, policy, mode="tournament", trace=trace, route_score_mode=route_score_mode)
+    trace_log(trace, trace_id, f"true-confirm round=1 pred={first.get('pred')} elapsed={time.monotonic() - started:.1f}s")
+
+    second = judge_case_once(case, llm, policy, mode="tournament", trace=trace, route_score_mode=route_score_mode)
+    trace_log(trace, trace_id, f"true-confirm round=2 pred={second.get('pred')} elapsed={time.monotonic() - started:.1f}s")
+
+    votes = [first, second]
+    if first.get("pred") == "진성" and second.get("pred") == "진성":
+        final = max(votes, key=lambda vote: int(vote.get("confidence", 0))).copy()
+    else:
+        false_votes = [vote for vote in votes if vote.get("pred") == "가성"]
+        if false_votes:
+            final = max(false_votes, key=lambda vote: int(vote.get("confidence", 0))).copy()
+        else:
+            final = first.copy()
+            final["pred"] = "가성"
+            final["confidence"] = min(int(final.get("confidence", 0) or 0), 50)
+            final["applied_step"] = "가성조건"
+            final["decisive_evidence"] = final.get("decisive_evidence", [])
+
+    return attach_true_confirm_metadata(final, votes)
+
+
+def attach_true_confirm_metadata(result: dict, votes: list[dict]) -> dict:
+    preds = [str(vote.get("pred", "")) for vote in votes]
+    confidences = [int(vote.get("confidence", 0) or 0) for vote in votes]
+    confirmed = preds == ["진성", "진성"]
+    summary = f"rounds=2, votes={'|'.join(preds)}, true_confirmed={confirmed}, final={result.get('pred', '')}"
+
+    result["vote_mode"] = "true_confirm"
+    result["vote_rounds"] = len(votes)
+    result["vote_results"] = preds
+    result["vote_confidences"] = confidences
+    result["vote_true_count"] = preds.count("진성")
+    result["vote_false_count"] = preds.count("가성")
+    result["vote_margin"] = abs(preds.count("진성") - preds.count("가성"))
+    result["vote_disagreement"] = len(set(preds)) > 1
+    result["true_confirmed"] = confirmed
+    result["vote_summary"] = summary
+    result["vote_details"] = [
+        {
+            "round": idx,
+            "pred": vote.get("pred", ""),
+            "confidence": vote.get("confidence", 0),
+            "reason": vote.get("reason", ""),
+            "applied_step": vote.get("applied_step", ""),
+        }
+        for idx, vote in enumerate(votes, start=1)
+    ]
+
+    base_reason = str(result.get("reason", "")).strip()
+    vote_line = f"[true_confirm] {summary}"
     result["reason"] = f"{base_reason}\n{vote_line}" if base_reason else vote_line
     result["correct"] = result.get("pred") == result.get("label", "")
     return result
