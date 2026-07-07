@@ -27,6 +27,34 @@ def judge_case(
     trace: bool = False,
     route_score_mode: str = "record",
 ) -> dict:
+    normalized_mode = str(mode or "tournament").strip().lower()
+    if normalized_mode in {"stable_vote", "vote", "best_of_3", "bo3", "majority"}:
+        return judge_case_stable_vote(
+            case=case,
+            llm=llm,
+            policy=policy,
+            trace=trace,
+            route_score_mode=route_score_mode,
+        )
+
+    return judge_case_once(
+        case=case,
+        llm=llm,
+        policy=policy,
+        mode=normalized_mode,
+        trace=trace,
+        route_score_mode=route_score_mode,
+    )
+
+
+def judge_case_once(
+    case: dict,
+    llm: Any,
+    policy: str,
+    mode: str = "tournament",
+    trace: bool = False,
+    route_score_mode: str = "record",
+) -> dict:
     trace_id = str(case.get("id", ""))
     started = time.monotonic()
     trace_log(trace, trace_id, f"start mode={mode}")
@@ -70,6 +98,91 @@ def judge_case(
     result["true_argument"] = true_argument
     result["false_argument"] = false_argument
     result["critic"] = critic
+    return result
+
+
+def judge_case_stable_vote(
+    case: dict,
+    llm: Any,
+    policy: str,
+    trace: bool = False,
+    route_score_mode: str = "record",
+) -> dict:
+    trace_id = str(case.get("id", ""))
+    started = time.monotonic()
+    trace_log(trace, trace_id, "stable-vote start")
+
+    votes: list[dict] = []
+    first = judge_case_once(case, llm, policy, mode="tournament", trace=trace, route_score_mode=route_score_mode)
+    votes.append(first)
+    trace_log(trace, trace_id, f"stable-vote round=1 pred={first.get('pred')} elapsed={time.monotonic() - started:.1f}s")
+
+    second = judge_case_once(case, llm, policy, mode="tournament", trace=trace, route_score_mode=route_score_mode)
+    votes.append(second)
+    trace_log(trace, trace_id, f"stable-vote round=2 pred={second.get('pred')} elapsed={time.monotonic() - started:.1f}s")
+
+    if first.get("pred") != second.get("pred"):
+        third = judge_case_once(case, llm, policy, mode="tournament", trace=trace, route_score_mode=route_score_mode)
+        votes.append(third)
+        trace_log(trace, trace_id, f"stable-vote round=3 pred={third.get('pred')} elapsed={time.monotonic() - started:.1f}s")
+
+    final = select_vote_winner(votes)
+    return attach_vote_metadata(final, votes)
+
+
+def select_vote_winner(votes: list[dict]) -> dict:
+    valid_labels = {"진성", "가성"}
+    counts = {label: 0 for label in valid_labels}
+    for vote in votes:
+        pred = vote.get("pred")
+        if pred in counts:
+            counts[pred] += 1
+
+    best_label, best_count = max(counts.items(), key=lambda item: item[1])
+    if best_count >= 2:
+        candidates = [vote for vote in votes if vote.get("pred") == best_label]
+        return max(candidates, key=lambda vote: int(vote.get("confidence", 0))).copy()
+
+    valid_votes = [vote for vote in votes if vote.get("pred") in valid_labels]
+    if valid_votes:
+        return max(valid_votes, key=lambda vote: int(vote.get("confidence", 0))).copy()
+
+    return votes[-1].copy()
+
+
+def attach_vote_metadata(result: dict, votes: list[dict]) -> dict:
+    preds = [str(vote.get("pred", "")) for vote in votes]
+    confidences = [int(vote.get("confidence", 0) or 0) for vote in votes]
+    true_count = preds.count("진성")
+    false_count = preds.count("가성")
+    margin = abs(true_count - false_count)
+    disagreement = len(set(preds)) > 1
+    summary = f"rounds={len(votes)}, votes={'|'.join(preds)}, final={result.get('pred', '')}"
+
+    result["vote_mode"] = "stable_vote"
+    result["vote_rounds"] = len(votes)
+    result["vote_results"] = preds
+    result["vote_confidences"] = confidences
+    result["vote_true_count"] = true_count
+    result["vote_false_count"] = false_count
+    result["vote_margin"] = margin
+    result["vote_disagreement"] = disagreement
+    result["vote_summary"] = summary
+    result["vote_details"] = [
+        {
+            "round": idx,
+            "pred": vote.get("pred", ""),
+            "confidence": vote.get("confidence", 0),
+            "reason": vote.get("reason", ""),
+            "applied_step": vote.get("applied_step", ""),
+        }
+        for idx, vote in enumerate(votes, start=1)
+    ]
+
+    base_reason = str(result.get("reason", "")).strip()
+    vote_line = f"[stable_vote] {summary}"
+    result["reason"] = f"{base_reason}\n{vote_line}" if base_reason else vote_line
+    result["correct"] = result.get("pred") == result.get("label", "")
     return result
 
 
