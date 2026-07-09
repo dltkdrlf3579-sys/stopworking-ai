@@ -154,9 +154,29 @@ def norm_bool(value: Any) -> bool:
     if value is None:
         return False
     text = str(value).strip().lower()
-    if text in {"true", "1", "yes", "y", "t"}:
+    compact = text.replace(" ", "")
+    true_values = {"true", "1", "yes", "y", "t", "예", "네", "맞음", "있음", "해당"}
+    false_values = {
+        "false",
+        "0",
+        "no",
+        "n",
+        "f",
+        "",
+        "아니오",
+        "아니요",
+        "아님",
+        "없음",
+        "해당없음",
+        "해당없슴",
+        "없슴",
+        "nan",
+        "none",
+        "null",
+    }
+    if compact in true_values:
         return True
-    if text in {"false", "0", "no", "n", "f", ""}:
+    if compact in false_values:
         return False
     return bool(value)
 
