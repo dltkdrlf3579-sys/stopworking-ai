@@ -147,6 +147,7 @@ def markdown_table(df: pd.DataFrame) -> list[str]:
     cols = [
         "profile",
         "flips",
+        "changed_pred_rows",
         "flip_precision",
         "accuracy_after",
         "accuracy_delta",

@@ -135,10 +135,10 @@ def pipe_support_false_gate(row: pd.Series | dict[str, Any], profile: str = "bal
     raise ValueError(f"Unknown pipe gate profile: {profile}")
 
 
-def compute_metrics(pred_df: pd.DataFrame) -> dict[str, Any]:
+def compute_metrics(pred_df: pd.DataFrame, pred_col: str = "pred", label_col: str = "label") -> dict[str, Any]:
     if pred_df.empty:
         return empty_metrics()
-    if "label" not in pred_df or "pred" not in pred_df:
+    if label_col not in pred_df or pred_col not in pred_df:
         return empty_metrics(total_n=len(pred_df))
 
     work = pred_df.copy()
@@ -148,8 +148,8 @@ def compute_metrics(pred_df: pd.DataFrame) -> dict[str, Any]:
     elif normalize_bool(excluded):
         work = work.iloc[0:0].copy()
 
-    labels = work["label"].map(normalize_label)
-    preds = work["pred"].map(normalize_label)
+    labels = work[label_col].map(normalize_label)
+    preds = work[pred_col].map(normalize_label)
     valid = labels.isin({JIN, GA}) & preds.isin({JIN, GA})
     work = work[valid].copy()
     labels = labels[valid]
@@ -183,9 +183,19 @@ def compute_metrics(pred_df: pd.DataFrame) -> dict[str, Any]:
 
 
 def summarize_gate(base_df: pd.DataFrame, gated_df: pd.DataFrame, name: str) -> dict[str, Any]:
-    base = compute_metrics(base_df)
-    gated = compute_metrics(gated_df)
+    compare_df = gated_df.copy()
+    if "pred_before_pipe_gate" not in compare_df:
+        compare_df["pred_before_pipe_gate"] = base_df.get("pred", "")
+
+    base = compute_metrics(compare_df, pred_col="pred_before_pipe_gate")
+    gated = compute_metrics(compare_df, pred_col="pred")
     flips = gated_df[gated_df.get("pipe_gate_applied", False).map(normalize_bool)].copy()
+    changed_pred_rows = int(
+        (
+            compare_df["pred_before_pipe_gate"].map(normalize_label)
+            != compare_df["pred"].map(normalize_label)
+        ).sum()
+    )
     if "label" in flips:
         flip_good = int((flips["label"].map(normalize_label) == GA).sum())
         flip_bad = int((flips["label"].map(normalize_label) == JIN).sum())
@@ -197,6 +207,7 @@ def summarize_gate(base_df: pd.DataFrame, gated_df: pd.DataFrame, name: str) -> 
         "profile": name,
         "n": gated.get("n", base.get("n", 0)),
         "flips": int(len(flips)),
+        "changed_pred_rows": changed_pred_rows,
         "flip_good_false_to_false": flip_good,
         "flip_bad_true_to_false": flip_bad,
         "flip_precision": safe_div(flip_good, flip_good + flip_bad),
