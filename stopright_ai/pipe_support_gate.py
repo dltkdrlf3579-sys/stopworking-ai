@@ -97,6 +97,7 @@ def pipe_support_false_gate(row: pd.Series | dict[str, Any], profile: str = "bal
         and (physical_status in {"실시됨", "실시필요"} or reinforcement == "있음")
     )
     countermeasure_weak = not countermeasures or countermeasures <= EMPTY_COUNTERMEASURES or physical_status in {"검토만", "없음", "불명확", "해당없음"}
+    admin_purpose = approval_purpose in ADMIN_PURPOSES or admin_only == "예"
     admin_negative = (
         admin_only == "예"
         or approval_purpose in ADMIN_PURPOSES
@@ -106,25 +107,36 @@ def pipe_support_false_gate(row: pd.Series | dict[str, Any], profile: str = "bal
     )
 
     positive_count = sum([phase_positive, force_positive, approval_positive, countermeasure_positive])
+    negative_count = sum([admin_purpose, prework_or_unclear, force_weak, countermeasure_weak])
     strong_true = phase_positive and (force_positive or approval_positive or countermeasure_positive)
 
     if strong_true:
         return False, "strong_pipe_true_evidence"
 
     if profile == "strict":
-        if admin_negative and positive_count == 0:
+        if (
+            positive_count == 0
+            and admin_purpose
+            and prework_or_unclear
+            and force_weak
+            and countermeasure_weak
+        ):
             return True, "strict_admin_or_unclear_no_positive_pipe_evidence"
         return False, "strict_no_gate"
 
     if profile == "approval_only":
-        if approval_positive and not phase_positive and not force_positive and not countermeasure_positive:
-            return True, "approval_only_without_phase_force_or_countermeasure"
-        if admin_negative and positive_count == 0:
+        if (
+            positive_count == 0
+            and admin_purpose
+            and not phase_positive
+            and not force_positive
+            and not countermeasure_positive
+        ):
             return True, "approval_only_admin_or_unclear_no_positive_pipe_evidence"
         return False, "approval_only_no_gate"
 
     if profile == "balanced":
-        if admin_negative and positive_count == 0:
+        if admin_negative and positive_count == 0 and negative_count >= 2:
             return True, "balanced_admin_or_unclear_no_positive_pipe_evidence"
         if prework_or_unclear and not force_positive and not countermeasure_positive and not approval_positive:
             return True, "balanced_prework_no_force_countermeasure_or_approval"
