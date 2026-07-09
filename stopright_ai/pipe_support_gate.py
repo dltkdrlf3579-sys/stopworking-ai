@@ -221,6 +221,87 @@ def summarize_gate(base_df: pd.DataFrame, gated_df: pd.DataFrame, name: str) -> 
     }
 
 
+def build_gate_diagnostics(pred_df: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for _, row in pred_df.iterrows():
+        evidence = parse_structured(row.get("evidence", {}))
+        pipe = evidence.get("pipe_support_evidence", {}) if isinstance(evidence, dict) else {}
+        if not isinstance(pipe, dict):
+            pipe = {}
+
+        route_primary = field(row, "route_primary")
+        is_pipe_case = field(pipe, "is_pipe_support_case")
+        pred = normalize_label(row.get("pred", ""))
+        is_candidate = pred == JIN and (route_primary == "pipe_support" or is_pipe_case == "예")
+
+        diagnostic = {
+            "id": field(row, "id"),
+            "label": normalize_label(row.get("label", "")),
+            "pred": pred,
+            "is_gate_candidate": is_candidate,
+            "route_primary": route_primary,
+            "is_pipe_support_case": is_pipe_case,
+            "work_phase_for_pipe": field(pipe, "work_phase_for_pipe"),
+            "actual_or_planned_work": field(pipe, "actual_or_planned_work"),
+            "stepping_context": field(pipe, "stepping_context"),
+            "forced_stepping_level": field(pipe, "forced_stepping_level"),
+            "standard_method_blocked": field(pipe, "standard_method_blocked"),
+            "permission_required_by_company_rule": field(pipe, "permission_required_by_company_rule"),
+            "approval_purpose": field(pipe, "approval_purpose"),
+            "admin_only_signal": field(pipe, "admin_only_signal"),
+            "physical_action_status": field(pipe, "physical_action_status"),
+            "reinforcement_or_method_change": field(pipe, "reinforcement_or_method_change"),
+            "physical_countermeasure": "|".join(list_field(pipe, "physical_countermeasure")),
+        }
+        for profile in ["strict", "balanced", "approval_only"]:
+            hit, reason = pipe_support_false_gate(row, profile=profile)
+            diagnostic[f"{profile}_hit"] = hit
+            diagnostic[f"{profile}_reason"] = reason
+        rows.append(diagnostic)
+    return pd.DataFrame(rows)
+
+
+def build_gate_diagnostics_summary(diagnostics: pd.DataFrame) -> pd.DataFrame:
+    if diagnostics.empty:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+
+    def add(name: str, value: Any) -> None:
+        rows.append({"metric": name, "value": value})
+
+    add("total_rows", len(diagnostics))
+    add("pred_true_rows", int((diagnostics["pred"] == JIN).sum()))
+    add("pipe_route_rows", int((diagnostics["route_primary"] == "pipe_support").sum()))
+    add("pipe_evidence_yes_rows", int((diagnostics["is_pipe_support_case"] == "예").sum()))
+    add("gate_candidate_rows", int(diagnostics["is_gate_candidate"].map(normalize_bool).sum()))
+    for profile in ["strict", "balanced", "approval_only"]:
+        add(f"{profile}_hit_rows", int(diagnostics[f"{profile}_hit"].map(normalize_bool).sum()))
+
+    for col in [
+        "work_phase_for_pipe",
+        "actual_or_planned_work",
+        "stepping_context",
+        "forced_stepping_level",
+        "standard_method_blocked",
+        "permission_required_by_company_rule",
+        "approval_purpose",
+        "admin_only_signal",
+        "physical_action_status",
+        "reinforcement_or_method_change",
+    ]:
+        counts = diagnostics.loc[diagnostics["is_gate_candidate"].map(normalize_bool), col].value_counts(dropna=False).head(12)
+        for key, count in counts.items():
+            add(f"candidate_{col}={key}", int(count))
+
+    for profile in ["strict", "balanced", "approval_only"]:
+        counts = diagnostics.loc[diagnostics["is_gate_candidate"].map(normalize_bool), f"{profile}_reason"].value_counts(dropna=False)
+        for key, count in counts.items():
+            add(f"{profile}_reason={key}", int(count))
+
+    return pd.DataFrame(rows)
+
+
 def load_prediction_files(input_path: Path, include_candidates: bool = False) -> pd.DataFrame:
     paths = find_prediction_files(input_path, include_candidates=include_candidates)
     frames = []

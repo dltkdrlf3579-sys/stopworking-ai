@@ -7,6 +7,8 @@ from pathlib import Path
 import pandas as pd
 
 from stopright_ai.pipe_support_gate import (
+    build_gate_diagnostics,
+    build_gate_diagnostics_summary,
     compute_metrics,
     load_prediction_files,
     simulate_pipe_support_gate,
@@ -49,6 +51,10 @@ def main() -> None:
 
     base_df = load_prediction_files(input_path, include_candidates=args.include_candidates)
     base_metrics = compute_metrics(base_df)
+    diagnostics = build_gate_diagnostics(base_df)
+    diagnostics_summary = build_gate_diagnostics_summary(diagnostics)
+    diagnostics.to_csv(out_dir / "pipe_support_gate_diagnostics_rows.csv", index=False, encoding="utf-8-sig")
+    diagnostics_summary.to_csv(out_dir / "pipe_support_gate_diagnostics_summary.csv", index=False, encoding="utf-8-sig")
 
     summary_rows = []
     profile_outputs = {}
@@ -75,6 +81,9 @@ def main() -> None:
     print(f"[pipe_gate] out_dir={out_dir}", flush=True)
     print("[pipe_gate] baseline", format_metrics(base_metrics), flush=True)
     print(summary.to_string(index=False), flush=True)
+    if not diagnostics_summary.empty:
+        print("[pipe_gate] diagnostics summary", flush=True)
+        print(diagnostics_summary.head(40).to_string(index=False), flush=True)
 
 
 def build_report(input_path: Path, base_metrics: dict, summary: pd.DataFrame) -> str:
