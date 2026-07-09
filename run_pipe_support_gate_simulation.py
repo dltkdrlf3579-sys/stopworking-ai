@@ -181,7 +181,8 @@ def markdown_table(df: pd.DataFrame) -> list[str]:
 
 def format_metrics(metrics: dict) -> str:
     return (
-        f"n={metrics.get('n', 0)} "
+        f"total_n={metrics.get('total_n', metrics.get('n', 0))} "
+        f"eval_n={metrics.get('n', 0)} "
         f"acc={metrics.get('accuracy', 0):.4f} "
         f"TP={metrics.get('true_precision', 0):.4f} "
         f"TR={metrics.get('true_recall', 0):.4f} "

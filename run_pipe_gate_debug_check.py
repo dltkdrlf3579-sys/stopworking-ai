@@ -67,6 +67,10 @@ def debug_summary(df: pd.DataFrame) -> list[dict[str, Any]]:
     add = lambda metric, value: rows.append({"metric": metric, "value": value})
 
     add("total_rows", len(work))
+    add("excluded_rows", int(work["_excluded"].sum()))
+    add("valid_label_rows", int(work["_label"].isin({JIN, GA}).sum()))
+    add("valid_before_rows", int(work["_before"].isin({JIN, GA}).sum()))
+    add("valid_after_rows", int(work["_after"].isin({JIN, GA}).sum()))
     add("eval_rows", int(eval_mask.sum()))
     add("changed_rows_all", int(changed_mask.sum()))
     add("changed_rows_eval", int((eval_mask & changed_mask).sum()))
@@ -93,6 +97,18 @@ def debug_summary(df: pd.DataFrame) -> list[dict[str, Any]]:
     if "pipe_gate_reason" in work.columns:
         for reason, count in work.loc[changed_mask, "pipe_gate_reason"].value_counts(dropna=False).head(20).items():
             add(f"changed_reason={reason}", int(count))
+
+    for prefix, col in [
+        ("raw_label", "label"),
+        ("raw_before", "pred_before_pipe_gate"),
+        ("raw_after", "pred"),
+        ("norm_label", "_label"),
+        ("norm_before", "_before"),
+        ("norm_after", "_after"),
+        ("exclude_from_metrics", "_excluded"),
+    ]:
+        for value, count in work[col].astype(str).value_counts(dropna=False).head(12).items():
+            add(f"{prefix}={value}", int(count))
 
     return rows
 
@@ -125,9 +141,9 @@ def norm_label(value: Any) -> str:
     text = "" if value is None else str(value).strip()
     if text in {JIN, GA}:
         return text
-    if "진" in text:
+    if "진성" in text or "진" in text or "\uf9de" in text:
         return JIN
-    if "가" in text:
+    if "가성" in text or "가" in text or "\u5a9b" in text:
         return GA
     return text
 
