@@ -141,19 +141,10 @@ def compute_metrics(pred_df: pd.DataFrame, pred_col: str = "pred", label_col: st
     if label_col not in pred_df or pred_col not in pred_df:
         return empty_metrics(total_n=len(pred_df))
 
-    work = pred_df.copy()
-    excluded = work.get("exclude_from_metrics", False)
-    if isinstance(excluded, pd.Series):
-        work = work[~excluded.map(normalize_bool)].copy()
-    elif normalize_bool(excluded):
-        work = work.iloc[0:0].copy()
+    work = pred_df[build_eval_mask(pred_df, pred_col=pred_col, label_col=label_col)].copy()
 
     labels = work[label_col].map(normalize_label)
     preds = work[pred_col].map(normalize_label)
-    valid = labels.isin({JIN, GA}) & preds.isin({JIN, GA})
-    work = work[valid].copy()
-    labels = labels[valid]
-    preds = preds[valid]
 
     n = int(len(work))
     if n == 0:
@@ -182,6 +173,24 @@ def compute_metrics(pred_df: pd.DataFrame, pred_col: str = "pred", label_col: st
     }
 
 
+def build_eval_mask(pred_df: pd.DataFrame, pred_col: str = "pred", label_col: str = "label") -> pd.Series:
+    if pred_df.empty:
+        return pd.Series([], dtype=bool, index=pred_df.index)
+    if label_col not in pred_df or pred_col not in pred_df:
+        return pd.Series([False] * len(pred_df), index=pred_df.index)
+
+    excluded = pred_df.get("exclude_from_metrics", False)
+    if isinstance(excluded, pd.Series):
+        excluded_mask = excluded.map(normalize_bool)
+    else:
+        excluded_mask = pd.Series([normalize_bool(excluded)] * len(pred_df), index=pred_df.index)
+
+    labels = pred_df[label_col].map(normalize_label)
+    preds = pred_df[pred_col].map(normalize_label)
+    valid = labels.isin({JIN, GA}) & preds.isin({JIN, GA})
+    return (~excluded_mask) & valid
+
+
 def summarize_gate(base_df: pd.DataFrame, gated_df: pd.DataFrame, name: str) -> dict[str, Any]:
     compare_df = gated_df.copy()
     if "pred_before_pipe_gate" not in compare_df:
@@ -196,21 +205,41 @@ def summarize_gate(base_df: pd.DataFrame, gated_df: pd.DataFrame, name: str) -> 
             != compare_df["pred"].map(normalize_label)
         ).sum()
     )
+    eval_mask = build_eval_mask(compare_df)
+    changed_eval_rows = int(
+        (
+            eval_mask
+            & (
+                compare_df["pred_before_pipe_gate"].map(normalize_label)
+                != compare_df["pred"].map(normalize_label)
+            )
+        ).sum()
+    )
+    eval_flips = flips[build_eval_mask(flips)].copy() if not flips.empty else flips.copy()
     if "label" in flips:
         flip_good = int((flips["label"].map(normalize_label) == GA).sum())
         flip_bad = int((flips["label"].map(normalize_label) == JIN).sum())
+        eval_flip_good = int((eval_flips["label"].map(normalize_label) == GA).sum()) if not eval_flips.empty else 0
+        eval_flip_bad = int((eval_flips["label"].map(normalize_label) == JIN).sum()) if not eval_flips.empty else 0
     else:
         flip_good = 0
         flip_bad = 0
+        eval_flip_good = 0
+        eval_flip_bad = 0
 
     return {
         "profile": name,
         "n": gated.get("n", base.get("n", 0)),
         "flips": int(len(flips)),
         "changed_pred_rows": changed_pred_rows,
+        "changed_eval_rows": changed_eval_rows,
+        "eval_flips": int(len(eval_flips)),
         "flip_good_false_to_false": flip_good,
         "flip_bad_true_to_false": flip_bad,
         "flip_precision": safe_div(flip_good, flip_good + flip_bad),
+        "eval_flip_good_false_to_false": eval_flip_good,
+        "eval_flip_bad_true_to_false": eval_flip_bad,
+        "eval_flip_precision": safe_div(eval_flip_good, eval_flip_good + eval_flip_bad),
         "accuracy_before": base.get("accuracy", 0),
         "accuracy_after": gated.get("accuracy", 0),
         "accuracy_delta": gated.get("accuracy", 0) - base.get("accuracy", 0),
