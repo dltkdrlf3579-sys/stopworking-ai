@@ -276,7 +276,18 @@ def build_gate_diagnostics_summary(diagnostics: pd.DataFrame) -> pd.DataFrame:
     add("pipe_evidence_yes_rows", int((diagnostics["is_pipe_support_case"] == "예").sum()))
     add("gate_candidate_rows", int(diagnostics["is_gate_candidate"].map(normalize_bool).sum()))
     for profile in ["strict", "balanced", "approval_only"]:
-        add(f"{profile}_hit_rows", int(diagnostics[f"{profile}_hit"].map(normalize_bool).sum()))
+        hit_mask = diagnostics[f"{profile}_hit"].map(normalize_bool)
+        candidate_mask = diagnostics["is_gate_candidate"].map(normalize_bool)
+        candidate_hit = diagnostics[hit_mask & candidate_mask]
+        add(f"{profile}_hit_rows_all_preds", int(hit_mask.sum()))
+        add(f"{profile}_candidate_hit_rows_actual_flips", int(len(candidate_hit)))
+        if "label" in candidate_hit:
+            add(f"{profile}_candidate_hit_actual_false", int((candidate_hit["label"] == GA).sum()))
+            add(f"{profile}_candidate_hit_actual_true", int((candidate_hit["label"] == JIN).sum()))
+            add(
+                f"{profile}_candidate_hit_precision",
+                round(safe_div(int((candidate_hit["label"] == GA).sum()), len(candidate_hit)), 4),
+            )
 
     for col in [
         "work_phase_for_pipe",
