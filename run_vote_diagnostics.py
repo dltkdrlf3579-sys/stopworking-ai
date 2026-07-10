@@ -231,6 +231,22 @@ def write_outputs(df: pd.DataFrame, files: list[Path], out_dir: Path) -> None:
     save_slice(recoverable_fn, out_dir / "recoverable_fn_one_true.csv", keep)
     save_slice(hard_fn, out_dir / "hard_fn_zero_true.csv", keep)
     save_slice(hard_fp, out_dir / "hard_fp_all_true.csv", keep)
+    save_error_clusters(
+        [
+            ("recoverable_fn_one_true", recoverable_fn),
+            ("hard_fn_zero_true", hard_fn),
+            ("hard_fp_all_true", hard_fp),
+        ],
+        out_dir / "vote_error_clusters.csv",
+    )
+    write_prompt_brief(
+        [
+            ("recoverable_fn_one_true", recoverable_fn),
+            ("hard_fn_zero_true", hard_fn),
+            ("hard_fp_all_true", hard_fp),
+        ],
+        out_dir / "vote_prompt_brief.md",
+    )
 
     summary = {
         "files": [str(p) for p in files],
@@ -246,6 +262,120 @@ def write_outputs(df: pd.DataFrame, files: list[Path], out_dir: Path) -> None:
 def save_slice(df: pd.DataFrame, path: Path, keep: list[str]) -> None:
     cols = [c for c in keep if c in df.columns]
     df[cols].to_csv(path, index=False, encoding="utf-8-sig")
+
+
+def save_error_clusters(groups: list[tuple[str, pd.DataFrame]], path: Path) -> None:
+    rows: list[dict[str, Any]] = []
+    cluster_cols = [
+        "route_primary",
+        "pipe_support_subtype",
+        "leak_contact_subtype",
+        "major",
+        "middle",
+        "vote_pattern",
+    ]
+    for error_type, frame in groups:
+        if frame.empty:
+            continue
+        available = [c for c in cluster_cols if c in frame.columns]
+        if not available:
+            rows.append({"error_type": error_type, "count": len(frame)})
+            continue
+        grouped = frame.groupby(available, dropna=False)
+        for keys, group in grouped:
+            if not isinstance(keys, tuple):
+                keys = (keys,)
+            row = {"error_type": error_type, "count": int(len(group))}
+            row.update({col: clean_value(value) for col, value in zip(available, keys)})
+            row["avg_confidence"] = safe_mean(group.get("confidence"))
+            row["top_terms"] = top_terms(group)
+            row["sample_titles"] = " / ".join(
+                str(v)[:80] for v in group.get("title", pd.Series(dtype=str)).dropna().head(3).tolist()
+            )
+            rows.append(row)
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out = out.sort_values(["error_type", "count"], ascending=[True, False])
+    out.to_csv(path, index=False, encoding="utf-8-sig")
+
+
+def write_prompt_brief(groups: list[tuple[str, pd.DataFrame]], path: Path) -> None:
+    lines = [
+        "# Vote Diagnostics Prompt Brief",
+        "",
+        "이 파일은 true_confirm 결과에서 강한 오답만 압축한 요약입니다.",
+        "",
+    ]
+    for error_type, frame in groups:
+        lines.append(f"## {error_type}")
+        lines.append(f"- rows: {len(frame)}")
+        if frame.empty:
+            lines.append("")
+            continue
+        for col in ["route_primary", "pipe_support_subtype", "leak_contact_subtype", "major", "middle", "vote_pattern"]:
+            if col in frame.columns:
+                lines.append(f"- {col}: {value_counts_text(frame[col])}")
+        lines.append(f"- top_terms: {top_terms(frame)}")
+        sample_cols = [c for c in ["id", "label", "pred", "vote_pattern", "major", "middle", "title"] if c in frame.columns]
+        if sample_cols:
+            lines.append("")
+            lines.append("|" + "|".join(sample_cols) + "|")
+            lines.append("|" + "|".join(["---"] * len(sample_cols)) + "|")
+            for _, row in frame.head(8).iterrows():
+                lines.append("|" + "|".join(escape_md(clean_value(row.get(c, ""))) for c in sample_cols) + "|")
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def safe_mean(series: Any) -> float:
+    if not isinstance(series, pd.Series) or series.empty:
+        return 0.0
+    nums = pd.to_numeric(series, errors="coerce").dropna()
+    return round(float(nums.mean()), 2) if not nums.empty else 0.0
+
+
+def top_terms(frame: pd.DataFrame, limit: int = 12) -> str:
+    text_cols = [
+        "title",
+        "major",
+        "middle",
+        "reason",
+        "decisive_evidence",
+        "route_primary",
+        "pipe_support_subtype",
+        "leak_contact_subtype",
+    ]
+    text = " ".join(
+        str(value)
+        for col in text_cols
+        if col in frame.columns
+        for value in frame[col].dropna().tolist()
+    )
+    tokens = []
+    for raw in text.replace("[", " ").replace("]", " ").replace(",", " ").replace("|", " ").split():
+        token = raw.strip("'\"(){}:;.-_")
+        if len(token) >= 2 and token not in {"진성", "가성", "해당없음", "불명확", "아니오", "있음", "없음"}:
+            tokens.append(token)
+    counts: dict[str, int] = {}
+    for token in tokens:
+        counts[token] = counts.get(token, 0) + 1
+    top = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    return ", ".join(f"{term}:{count}" for term, count in top)
+
+
+def value_counts_text(series: pd.Series, limit: int = 8) -> str:
+    counts = series.fillna("").map(clean_value).value_counts().head(limit)
+    return ", ".join(f"{idx}:{int(value)}" for idx, value in counts.items())
+
+
+def clean_value(value: Any) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value).replace("\r", " ").replace("\n", " ").strip()
+
+
+def escape_md(value: str) -> str:
+    return value.replace("|", "\\|")
 
 
 def normalize_label(value: Any) -> str:
