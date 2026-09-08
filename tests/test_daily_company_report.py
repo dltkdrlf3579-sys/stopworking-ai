@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+from copy import deepcopy
 import io
 import json
 import tempfile
@@ -13,7 +14,7 @@ import pandas as pd
 
 from stopright_ai.daily_company_report import (
     FIELDS, KST, aggregate, analyse, case_batches, prepare_rows, render_html, resolve_period,
-    run_report, validate_notes,
+    run_report, select_focus_companies, validate_brief, validate_notes,
 )
 
 
@@ -34,7 +35,55 @@ def source() -> pd.DataFrame:
     ])
 
 
+def brief_response(payload: dict, overview: str = "보고서 요약") -> dict:
+    return {"overview": overview, "companies": [
+        {"company": c["company"], "detail": "가성 판단 근거 확인이 필요한 사례입니다.",
+         "recommendation": "담당자가 원문과 판정 기준을 확인합니다.",
+         "ids": payload["focus_false_case_ids"][c["company"]][:1]}
+        for c in payload["statistics"]["focus_companies"]
+    ], "actions": ["작업 전 준비사항을 확인합니다."]}
+
+
 class DailyReportTest(unittest.TestCase):
+    def test_focus_ranking_prioritizes_count_then_ratio_and_caps_at_five(self):
+        companies = [
+            {"company": name, "true": true, "false": false, "pending": 0,
+             "total": true + false, "false_pct": 100 * false / (true + false) if true + false else None}
+            for name, true, false in [("A", 50, 50), ("B", 0, 50), ("C", 1, 30), ("D", 10, 20),
+                                     ("E", 10, 15), ("F", 0, 10), ("ONE", 0, 1), ("ZERO", 50, 0),
+                                     ("업체명 미확인", 0, 100)]
+        ]
+        self.assertEqual([c["company"] for c in select_focus_companies(companies)], ["B", "A", "C", "D", "E"])
+        self.assertEqual(select_focus_companies([companies[7]]), [])
+
+    def test_brief_requires_selected_companies_false_evidence_and_short_advice(self):
+        allowed = {"A업체": {"A1"}}
+        valid = {"overview": "핵심 현황", "companies": [{"company": "A업체", "detail": "가성 사유",
+                 "recommendation": "담당자가 착수 전 서명 항목을 확인합니다.", "ids": ["A1"]}], "actions": []}
+        validate_brief(valid, allowed)
+        bad = []
+        wrong = deepcopy(valid)
+        wrong["companies"][0]["ids"] = ["B1"]
+        bad.append(wrong)
+        missing = deepcopy(valid)
+        missing["companies"] = []
+        bad.append(missing)
+        duplicate = deepcopy(valid)
+        duplicate["companies"] *= 2
+        bad.append(duplicate)
+        long_advice = deepcopy(valid)
+        long_advice["companies"][0]["recommendation"] = "가" * 81
+        bad.append(long_advice)
+        long_overview = deepcopy(valid)
+        long_overview["overview"] = "가" * 141
+        bad.append(long_overview)
+        too_many_actions = deepcopy(valid)
+        too_many_actions["actions"] = ["확인"] * 3
+        bad.append(too_many_actions)
+        for index, result in enumerate(bad):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                validate_brief(result, allowed)
+
     def test_period_arguments_and_korean_yesterday_default(self):
         self.assertEqual(resolve_period("2026-09-08"), (date(2026, 9, 8), date(2026, 9, 8)))
         self.assertEqual(resolve_period(start_date="2026-08-01", end_date="2026-08-31"),
@@ -152,6 +201,27 @@ class DailyReportTest(unittest.TestCase):
         self.assertIn("&lt;script&gt;", html)
         self.assertIn("100.0%", html)
 
+    def test_html_only_shows_five_company_rows_and_no_long_sections(self):
+        df = source().iloc[[0]].copy()
+        frames = []
+        for i in range(8):
+            row = df.copy()
+            row["출원번호"] = f"ID-{i}"
+            row["업체명"] = f"업체-{i}"
+            row["AI판정"] = "가성"
+            frames.append(row)
+        data, meta = prepare_rows(pd.concat(frames, ignore_index=True), settings(), date(2026, 9, 8))
+        stats = aggregate(data, date(2026, 9, 8), meta)
+        self.assertEqual(len(stats["companies"]), 8)
+        self.assertEqual(len(stats["focus_companies"]), 5)
+        html = render_html(stats, {"overview": "핵심 요약", "companies": [], "actions": ["준비사항 확인"]})
+        self.assertEqual(html.count('data-company-row="true"'), 5)
+        self.assertIn("업체-4", html)
+        self.assertNotIn("업체-5", html)
+        self.assertNotIn("등록 유형별 현황", html)
+        self.assertNotIn("후속 확인사항", html)
+        self.assertIn("개선 조언", html)
+
     def test_ai_receives_each_company_separately_and_full_statistics(self):
         config = settings()
         data, meta = prepare_rows(source(), config, date(2026, 9, 7), date(2026, 9, 8))
@@ -163,18 +233,49 @@ class DailyReportTest(unittest.TestCase):
                 self.assertEqual(payload["start_date"], "2026-09-07")
                 self.assertEqual(payload["end_date"], "2026-09-08")
                 rows = payload["cases"]
+                self.assertEqual(payload["focus_company"], rows[0]["company"] == "A업체")
                 self.assertTrue(all(row["date"] in {"2026-09-07", "2026-09-08"} for row in rows))
                 self.assertEqual(len({row["company"] for row in rows}), 1)
                 seen.extend(row["id"] for row in rows)
                 return {"observations": [{"title": "등록 사유", "detail": "기록 확인", "ids": [rows[0]["id"]]}]}
             self.assertEqual(payload["statistics"]["overall"]["total"], 5)
             self.assertEqual(payload["statistics"]["end_date"], "2026-09-08")
-            return {"overview": "보고서 요약", "issues": [], "companies": [], "actions": []}
+            return brief_response(payload)
         with tempfile.TemporaryDirectory() as temp, patch("stopright_ai.daily_company_report.invoke_json", fake_invoke):
             result, partials = analyse(data, stats, "지침", object(), config, Path(temp) / "partial.json")
         self.assertCountEqual(seen, data["id"].tolist())
         self.assertEqual(sum(p["analysed_rows"] for p in partials), 5)
         self.assertEqual(result["overview"], "보고서 요약")
+        self.assertEqual([c["company"] for c in result["companies"]], ["A업체"])
+
+    def test_overlong_brief_is_rewritten_once_without_truncation(self):
+        config = settings()
+        data, meta = prepare_rows(source(), config, date(2026, 9, 8))
+        stats = aggregate(data, date(2026, 9, 8), meta)
+        final_calls = []
+        def fake_invoke(llm, system, user):
+            payload = json.loads(user)
+            if "cases" in payload:
+                return {"observations": [{"title": "현상", "detail": "기록 확인", "ids": [payload["cases"][0]["id"]]}]}
+            final_calls.append(system)
+            result = brief_response(payload)
+            if len(final_calls) == 1:
+                result["overview"] = "긴 요약" * 100
+            return result
+        with patch("stopright_ai.daily_company_report.invoke_json", fake_invoke):
+            result, _ = analyse(data, stats, "지침", object(), config)
+        self.assertEqual(len(final_calls), 2)
+        self.assertIn("140자", final_calls[-1])
+        self.assertEqual(result["overview"], "보고서 요약")
+
+    def test_no_false_companies_does_not_invent_a_ranking(self):
+        df = source().iloc[[0]].copy()
+        data, meta = prepare_rows(df, settings(), date(2026, 9, 8))
+        stats = aggregate(data, date(2026, 9, 8), meta)
+        self.assertEqual(stats["focus_companies"], [])
+        validate_brief({"overview": "가성 판정 건이 없습니다.", "companies": [], "actions": []}, {})
+        html = render_html(stats, {"overview": "가성 판정 건이 없습니다.", "companies": [], "actions": []})
+        self.assertIn("분석 대상 가성 업체가 없습니다", html)
 
     def test_end_to_end_query_ai_and_mail_body_without_sending(self):
         root = Path(__file__).resolve().parents[1]
@@ -197,7 +298,7 @@ class DailyReportTest(unittest.TestCase):
                 payload = json.loads(user)
                 if "cases" in payload:
                     return {"observations": [{"title": "현상", "detail": "기록 확인", "ids": [payload["cases"][0]["id"]]}]}
-                return {"overview": "테스트 요약", "issues": [], "companies": [], "actions": ["기준 확인"]}
+                return brief_response(payload, "테스트 요약")
             with patch("stopright_ai.daily_company_report.load_execute_sql", return_value=query_fn), patch("stopright_ai.daily_company_report.invoke_json", fake_invoke):
                 report = run_report(str(config_file), "2026-09-08", llm=object())
             mail = json.loads((report.parent / "mail_content.json").read_text(encoding="utf-8"))
@@ -215,7 +316,7 @@ class DailyReportTest(unittest.TestCase):
                 report = run_report(str(config_file), start_date="2026-09-07", end_date="2026-09-08", llm=object())
             mail = json.loads((report.parent / "mail_content.json").read_text(encoding="utf-8"))
             self.assertIn("2026-09-07 ~ 2026-09-08 업체별 기간 보고서", mail["subject"])
-            self.assertIn("기간 요약", mail["html_body"])
+            self.assertIn("가성 다발 업체", mail["html_body"])
             self.assertNotIn("오늘의 요약", mail["html_body"])
             self.assertEqual(json.loads((report.parent / "summary.json").read_text(encoding="utf-8"))["overall"]["total"], 5)
 

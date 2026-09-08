@@ -29,20 +29,28 @@ PART_SCHEMA = '''
 {"observations": [{"title": "주요 등록 사유", "detail": "원문에서 확인한 사실과 판정 사유 2문장 이내", "ids": ["출원번호"]}]}
 이 호출에는 한 업체의 사례만 제공된다. 핵심 관찰 1~4개만 출력한다.
 가성 사례가 있다면 등록 계기와 기존 AI의 가성 판정 근거를 분리해 설명한다.
+focus_company=true이면 가성 사례의 반복 원인, 작업 전 준비로 예방할 수 있었던 사항과 개선 조언의 근거를 우선 추출한다.
+권고는 사실과 구분하며, 위험한 작업을 계속하거나 신고를 줄이도록 권하지 않는다.
 "협의가 많음" 같은 단어 요약에서 끝내지 말고 무엇 때문에 어떤 조치·협의를 했는지 설명한다.
 빈도 수치를 만들지 말고, 각 관찰에 실제 입력 출원번호를 1~5개 연결한다.
 '''
 FINAL_SCHEMA = '''
 [최종 보고서 출력]
 {
-  "overview": "보고 기간 전체 현황을 2~3문장으로 요약",
-  "issues": [{"title": "주요 이슈", "detail": "확인된 현황 2문장 이내", "ids": ["출원번호"]}],
-  "companies": [{"company": "업체명", "detail": "가성 등록의 주요 사유와 확인할 사항 2문장 이내", "ids": ["출원번호"]}],
-  "actions": ["후속 확인 권고"]
+  "overview": "핵심 현황 1~2문장, 공백 포함 140자 이내",
+  "companies": [{"company": "업체명", "detail": "주요 가성 사유 한 문장, 80자 이내", "recommendation": "원인에 대응하는 구체적 개선 조언 한 문장, 80자 이내", "ids": ["해당 업체의 가성 출원번호"]}],
+  "actions": ["공통 실행사항 한 문장, 80자 이내"]
 }
-issues는 최대 4개, companies는 최대 6개, actions는 최대 3개로 작성한다.
-업체별 표는 코드가 별도로 표시하므로 표를 출력하지 않는다.
-companies에는 가성 건수가 많은 업체를 우선 설명하되, 제공 근거가 있는 업체만 쓴다.
+PPT 한 장 분량의 핵심 보고다. 긴 분석, 별도 유형별 목록, 반복 설명은 출력하지 않는다.
+companies에는 statistics.focus_companies의 업체를 빠짐없이 한 번씩만 같은 순서로 출력한다. 없으면 빈 배열이다.
+업체 선정과 숫자는 코드가 확정한다. 업체를 추가하거나 순위를 바꾸지 않는다.
+detail은 무슨 일로 등록했고 기존 AI가 왜 가성으로 판단했는지 핵심 원인을 적는다.
+recommendation은 그 원인에 대응하여 누가 작업 전에 무엇을 확인·준비·보완할지 적는다.
+"교육 강화", "주의 필요"처럼 모든 업체에 붙일 수 있는 추상적 조언은 피한다.
+근거가 부족하면 원인 확인 및 기록 보완을 제안하고, 잘못이나 개선 효과를 추측하지 않는다.
+각 업체 ids는 같은 업체의 실제 가성 사례 1~3개로 제한한다. actions는 최대 2개이다.
+업체별 표와 수치는 코드가 표시하므로 회사 설명에서 건수·비율을 반복하지 않는다.
+가성 감소는 사전 준비와 위험 제거로 같은 등록 사유를 예방한다는 뜻이다. 신고 억제, 보고 건수 할당, 위험 감수를 권하지 않는다.
 통계에는 전수 집계만 사용한다. 분할 관찰은 대표 근거이지 주제별 전체 빈도가 아니다.
 '''
 
@@ -128,6 +136,11 @@ def counts(group: pd.DataFrame) -> dict:
             "false_pct": round(false / valid * 100, 1) if valid else None}
 
 
+def select_focus_companies(companies: list[dict]) -> list[dict]:
+    eligible = [c for c in companies if c["false"] > 0 and c["company"] != "업체명 미확인"]
+    return sorted(eligible, key=lambda c: (-c["false"], -c["false"] / (c["true"] + c["false"]), c["company"]))[:5]
+
+
 def aggregate(data: pd.DataFrame, target: date, metadata: dict, end_date: date | None = None) -> dict:
     end = end_date or target
     companies = [{"company": name, **counts(group)} for name, group in data.groupby("company", sort=True)]
@@ -138,6 +151,7 @@ def aggregate(data: pd.DataFrame, target: date, metadata: dict, end_date: date |
             "period_label": target.isoformat() if target == end else f"{target} ~ {end}",
             "report_type": "일일" if target == end else "기간",
             "overall": counts(data), "companies": companies,
+            "focus_companies": select_focus_companies(companies),
             "issues": issues, "data_checks": metadata}
 
 
@@ -183,6 +197,31 @@ def validate_notes(notes: Any, allowed_ids: set[str], *, company_ids: dict | Non
             raise ValueError("AI가 다른 업체의 사례를 업체 분석 근거로 사용했습니다.")
 
 
+def validate_brief(result: dict, focus_ids: dict[str, set[str]]) -> None:
+    if not isinstance(result, dict):
+        raise ValueError("최종 보고서는 JSON 객체여야 합니다.")
+    overview = result.get("overview")
+    if not isinstance(overview, str) or not overview.strip() or len(overview) > 140:
+        raise ValueError("overview는 비어 있지 않은 140자 이내 요약이어야 합니다.")
+    allowed_ids = {case_id for ids in focus_ids.values() for case_id in ids}
+    companies = result.get("companies")
+    validate_notes(companies, allowed_ids, company_ids=focus_ids)
+    if [c["company"] for c in companies] != list(focus_ids):
+        raise ValueError("companies에는 선정된 업체만 지정 순서로 한 번씩 모두 포함해야 합니다.")
+    for company in companies:
+        for key in ("detail", "recommendation"):
+            value = company.get(key)
+            if not isinstance(value, str) or not value.strip() or len(value) > 80:
+                raise ValueError(f"업체별 {key}은 비어 있지 않은 80자 이내 문장이어야 합니다.")
+        if not 1 <= len(company["ids"]) <= 3:
+            raise ValueError("업체별 근거 출원번호는 1~3개여야 합니다.")
+    actions = result.get("actions")
+    if not isinstance(actions, list) or len(actions) > 2 or any(
+        not isinstance(action, str) or not action.strip() or len(action) > 80 for action in actions
+    ):
+        raise ValueError("actions는 각각 80자 이내 문장으로 최대 2개만 작성해야 합니다.")
+
+
 def analyse(data: pd.DataFrame, stats: dict, prompt: str, llm: Any, config: Any,
             partial_file: Path | None = None) -> tuple[dict, list]:
     max_chars = config.getint("report", "max_batch_chars", fallback=24000)
@@ -192,9 +231,11 @@ def analyse(data: pd.DataFrame, stats: dict, prompt: str, llm: Any, config: Any,
     batches = [batch for _, group in data.groupby("company", sort=True)
                for batch in case_batches(group, max_chars, field_chars)]
     partials = [None] * len(batches)
+    focus_names = {c["company"] for c in stats["focus_companies"]}
 
     def analyse_batch(batch: list[dict]) -> dict:
-        payload = {"start_date": stats["start_date"], "end_date": stats["end_date"], "cases": batch}
+        payload = {"start_date": stats["start_date"], "end_date": stats["end_date"], "cases": batch,
+                   "focus_company": batch[0]["company"] in focus_names}
         part = invoke_json(llm, prompt + PART_SCHEMA, json.dumps(payload, ensure_ascii=False))
         validate_notes(part.get("observations"), {c["id"] for c in batch})
         if not 1 <= len(part["observations"]) <= 4:
@@ -210,21 +251,19 @@ def analyse(data: pd.DataFrame, stats: dict, prompt: str, llm: Any, config: Any,
                 save_json(partial_file, [p for p in partials if p is not None])
             print(f"[daily-report] AI analysis {done}/{len(batches)} completed", flush=True)
     print("[daily-report] composing report", flush=True)
-    ownership = dict(zip(data["id"], data["company"]))
-    payload = json.dumps({"statistics": stats, "observations": partials, "case_companies": ownership}, ensure_ascii=False)
+    focus_ids = {c["company"]: set(data.loc[data["company"].eq(c["company"]) & data["prediction"].eq("가성"), "id"])
+                 for c in stats["focus_companies"]}
+    payload = json.dumps({"statistics": stats, "observations": partials,
+                          "focus_false_case_ids": {name: sorted(ids) for name, ids in focus_ids.items()}}, ensure_ascii=False)
     if len(payload) > config.getint("report", "max_final_chars", fallback=100000):
         raise ValueError("최종 종합 입력 한도를 초과했습니다. summary.json과 partial_analysis.json을 확인하세요.")
     result = invoke_json(llm, prompt + FINAL_SCHEMA, payload)
-    if not isinstance(result.get("overview"), str) or not result["overview"].strip():
-        raise ValueError("AI 보고서 요약이 비어 있습니다.")
-    company_ids = {name: set(g["id"]) for name, g in data.groupby("company")}
-    validate_notes(result.get("issues"), set(data["id"]))
-    validate_notes(result.get("companies"), set(data["id"]), company_ids=company_ids)
-    actions = result.get("actions")
-    if not isinstance(actions, list) or any(not isinstance(x, str) for x in actions):
-        raise ValueError("후속 확인사항은 문자열 배열이어야 합니다.")
-    if len(result["issues"]) > 4 or len(result["companies"]) > 6 or len(actions) > 3:
-        raise ValueError("AI 보고서 항목 수가 출력 규칙을 초과했습니다.")
+    try:
+        validate_brief(result, focus_ids)
+    except ValueError as exc:
+        print("[daily-report] retrying concise report format", flush=True)
+        result = invoke_json(llm, prompt + FINAL_SCHEMA + f"\n이전 출력의 오류를 바로잡아 다시 작성한다: {exc}", payload)
+        validate_brief(result, focus_ids)
     return result, partials
 
 
@@ -232,35 +271,39 @@ def render_html(stats: dict, narrative: dict, demo: bool = False) -> str:
     esc = lambda value: escape(str(value), quote=True)
     period = stats.get("period_label", stats["date"])
     report_type = stats.get("report_type", "일일")
-    summary_title = "오늘의 요약" if report_type == "일일" else "기간 요약"
-    def table(headers: list, rows: list) -> str:
-        head = "".join(f'<th style="padding:11px 10px;text-align:left;border-bottom:2px solid #cad5d7;background:#edf3f3">{esc(h)}</th>' for h in headers)
-        body = "".join("<tr>" + "".join(f'<td style="padding:10px;border-bottom:1px solid #e1e5e7">{esc(c)}</td>' for c in row) + "</tr>" for row in rows)
-        return f'<table style="width:100%;border-collapse:collapse;font-size:14px;margin:16px 0"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
-    def notes(items: list, key: str) -> str:
-        return "".join(f'<h3 style="font-size:16px;margin:20px 0 6px">{esc(n[key])}</h3><p style="margin:0">{esc(n["detail"])}</p><p style="font-size:12px;color:#64716e;margin:5px 0">근거: {esc(", ".join(n["ids"]))}</p>' for n in items)
+    focus = stats.get("focus_companies", select_focus_companies(stats["companies"]))
+    descriptions = {c["company"]: c for c in narrative["companies"]}
     overall = stats["overall"]
-    metric_rows = [[overall["total"], overall["true"], overall["false"], overall["pending"]]]
-    company_rows = [[c["company"], c["total"], c["true"], c["false"], c["pending"],
-                     "-" if c["false_pct"] is None else f'{c["false_pct"]:.1f}%'] for c in stats["companies"]]
-    issue_rows = [[c["major"], c["total"], c["true"], c["false"]] for c in stats["issues"]]
-    demo_banner = '<p style="background:#fff1d6;padding:12px;font-weight:bold">시연용 가상 데이터 · 예시 문장 (DB/API 미호출)</p>' if demo else ""
-    action_html = "".join(f'<li style="margin-bottom:8px">{esc(a)}</li>' for a in narrative["actions"])
-    return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(period)} 작업중지권 {esc(report_type)} 보고서</title></head>
-<body style="margin:0;background:#f2f4f5;color:#243331;font-family:'Malgun Gothic',Arial,sans-serif;line-height:1.7">
-<main style="max-width:980px;margin:0 auto;background:#fff;padding:28px 24px">
-{demo_banner}<p style="color:#087e79;font-weight:bold;margin:0">안전관리 {esc(report_type)} 현황</p>
-<h1 style="font-size:26px;margin:6px 0">{esc(period)} 작업중지권 보고서</h1>
-<p style="color:#65736e;margin:0">대상 기간 등록 사례 · 업체별 AI 판정 및 주요 이슈</p>
-{table(['전체 등록', 'AI 진성', 'AI 가성', '보류·미판정'], metric_rows)}
-<h2 style="font-size:19px;border-top:2px solid #087e79;padding-top:20px">{summary_title}</h2><p>{esc(narrative['overview'])}</p>
-<h2 style="font-size:19px;margin-top:30px">등록 유형별 현황</h2>{table(['등록 분류', '전체', 'AI 진성', 'AI 가성'], issue_rows)}
-{notes(narrative['issues'], 'title')}
-<h2 style="font-size:19px;margin-top:30px">업체별 현황</h2><p style="font-size:12px;color:#65736e">AI 가성 건수 내림차순 · 가성 비율 = 가성 / (진성 + 가성), 보류·미판정 제외</p>
-{table(['업체명', '전체', 'AI 진성', 'AI 가성', '보류', '가성 비율'], company_rows)}
-{notes(narrative['companies'], 'company')}
-<h2 style="font-size:19px;margin-top:30px">후속 확인사항</h2><ul>{action_html}</ul>
-<p style="font-size:12px;color:#65736e;border-top:1px solid #dce2e0;padding-top:18px">기존 AI 판정 결과를 요약한 자료입니다. 집계는 전체 대상 건 기준이며 서술은 현상·조치·판단 근거의 요약입니다. AI 가성 건수만으로 업체의 안전수준을 평가하지 않습니다.</p>
+    metric_cells = "".join(
+        f'<td style="width:25%;padding:10px 12px;border-bottom:2px solid {color}"><span style="font-size:12px;color:#65736e">{label}</span><br><strong style="font-size:23px">{overall[key]}</strong><span style="font-size:12px"> 건</span></td>'
+        for key, label, color in [("total", "전체 등록", "#83908b"), ("true", "AI 진성", "#317db0"),
+                                  ("false", "AI 가성", "#d49037"), ("pending", "보류·미판정", "#b5bdbc")]
+    )
+    headers = [("업체명", 18), ("가성 건수", 10), ("가성 비율", 10), ("주요 가성 사유", 31), ("개선 조언", 31)]
+    head = "".join(f'<th style="width:{width}%;padding:9px 8px;text-align:left;background:#edf3f3;border-bottom:2px solid #bfcfcb">{label}</th>' for label, width in headers)
+    rows = []
+    for company in focus:
+        detail = descriptions.get(company["company"], {})
+        values = [company["company"], f'{company["false"]}건', f'{company["false_pct"]:.1f}%',
+                  detail.get("detail", "근거 확인 필요"), detail.get("recommendation", "원문과 판정 근거를 확인해 주세요.")]
+        rows.append('<tr data-company-row="true">' + "".join(
+            f'<td style="padding:10px 8px;border-bottom:1px solid #dce3e0;vertical-align:top">{esc(value)}</td>' for value in values
+        ) + '</tr>')
+    table = f'<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:14px"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table>' if focus else '<p>분석 대상 가성 업체가 없습니다.</p>'
+    demo_banner = '<p style="background:#fff1d6;padding:6px 10px;font-size:12px;margin:0 0 10px">시연용 가상 데이터 · 예시 문장 (DB/API 미호출)</p>' if demo else ""
+    action_html = "".join(f'<li style="margin-bottom:3px">{esc(action)}</li>' for action in narrative["actions"])
+    return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(period)} 작업중지권 {esc(report_type)} 핵심 보고</title></head>
+<body style="margin:0;background:#f2f4f5;color:#243331;font-family:'Malgun Gothic',Arial,sans-serif;line-height:1.5;overflow-wrap:anywhere">
+<main style="max-width:1120px;margin:0 auto;background:#fff;padding:22px 24px">
+{demo_banner}<h1 style="font-size:22px;margin:0">작업중지권 핵심 보고</h1>
+<p style="font-size:13px;color:#65736e;margin:3px 0 12px">{esc(period)} · 업체별 가성 사유 및 개선 조언</p>
+<table style="width:100%;table-layout:fixed;border-collapse:collapse"><tbody><tr>{metric_cells}</tr></tbody></table>
+<p style="font-size:14px;margin:12px 0 16px">{esc(narrative['overview'])}</p>
+<h2 style="font-size:17px;margin:0 0 4px">가성 다발 업체 {len(focus)}곳</h2>
+<p style="font-size:11px;color:#65736e;margin:0 0 8px">가성 건수 순 · 동률은 가성 비율 순 · 비율 = 가성 / (진성 + 가성), 보류 제외</p>
+{table}
+<h2 style="font-size:15px;margin:14px 0 5px">공통 실행사항</h2><ul style="font-size:13px;padding-left:20px;margin:0">{action_html}</ul>
+<p style="font-size:11px;color:#65736e;border-top:1px solid #dce2e0;padding-top:9px;margin:12px 0 0">AI 판정 기반 참고자료입니다. 가성 건수는 업체 안전수준과 다르며, 위험 발견 시 작업중지는 유지합니다.</p>
 </main></body></html>'''
 
 
@@ -282,11 +325,18 @@ def demo_data(target: date, end_date: date | None = None) -> pd.DataFrame:
 
 
 def demo_narrative(data: pd.DataFrame, stats: dict) -> dict:
-    top = stats["companies"][0]
+    companies = []
+    for company in stats["focus_companies"]:
+        cases = data.loc[data["company"].eq(company["company"]) & data["prediction"].eq("가성")]
+        if company["company"] == "시연 B시공":
+            detail, recommendation = "허가서 서명 누락 후 보완하는 사례로 구성된 시연 자료입니다.", "작업 책임자가 착수 전 서명·허가 항목을 확인하도록 안내합니다."
+        else:
+            detail, recommendation = "시연용 판정만 있어 실제 가성 원인은 확인할 수 없습니다.", "담당자가 해당 사례의 원문과 가성 판단 근거를 먼저 확인합니다."
+        companies.append({"company": company["company"], "detail": detail, "recommendation": recommendation,
+                          "ids": cases["id"].head(2).tolist()})
     return {
         "overview": f'시연용 가상 사례 {len(data)}건을 집계했습니다. 서류 보완 및 배관 밟음 관련 등록을 확인할 수 있습니다.',
-        "issues": [{"title": "작업 준비 과정의 서류 확인", "detail": "작업허가서 서명 누락과 보완 사례를 예시로 구성했습니다.", "ids": ["DEMO-0009"]}],
-        "companies": [{"company": top["company"], "detail": f'전체 {top["total"]}건 중 AI 가성 {top["false"]}건입니다. 예시 기록에는 허가서 서명 보완이 기재되어 있습니다.', "ids": ["DEMO-0011"]}],
+        "companies": companies,
         "actions": ["작업 전 서류 확인 절차 안내 검토", "실제 데이터 연결 후 업체별 사유와 집계 확인"],
     }
 
