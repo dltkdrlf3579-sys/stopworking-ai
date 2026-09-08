@@ -35,7 +35,7 @@ PART_SCHEMA = '''
 FINAL_SCHEMA = '''
 [최종 보고서 출력]
 {
-  "overview": "당일 현황을 2~3문장으로 요약",
+  "overview": "보고 기간 전체 현황을 2~3문장으로 요약",
   "issues": [{"title": "주요 이슈", "detail": "확인된 현황 2문장 이내", "ids": ["출원번호"]}],
   "companies": [{"company": "업체명", "detail": "가성 등록의 주요 사유와 확인할 사항 2문장 이내", "ids": ["출원번호"]}],
   "actions": ["후속 확인 권고"]
@@ -60,7 +60,26 @@ def local_day(value: Any) -> date:
     return stamp.date()
 
 
-def prepare_rows(df: pd.DataFrame, config: Any, target: date) -> tuple[pd.DataFrame, dict]:
+def resolve_period(target_date: str | None = None, start_date: str | None = None,
+                   end_date: str | None = None) -> tuple[date, date]:
+    if target_date is not None and (start_date is not None or end_date is not None):
+        raise ValueError("--target-date와 --start-date/--end-date는 함께 사용할 수 없습니다.")
+    if (start_date is None) != (end_date is None):
+        raise ValueError("기간 보고는 --start-date와 --end-date를 모두 지정하세요.")
+    if start_date is not None:
+        start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+    else:
+        start = end = date.fromisoformat(target_date) if target_date is not None else datetime.now(KST).date() - timedelta(days=1)
+    if start > end:
+        raise ValueError("시작일은 종료일보다 늦을 수 없습니다.")
+    return start, end
+
+
+def prepare_rows(df: pd.DataFrame, config: Any, target: date,
+                 end_date: date | None = None) -> tuple[pd.DataFrame, dict]:
+    end = end_date or target
+    if target > end:
+        raise ValueError("시작일은 종료일보다 늦을 수 없습니다.")
     if not isinstance(df, pd.DataFrame) or not df.columns.is_unique:
         raise ValueError("쿼리 결과는 중복 컬럼명이 없는 DataFrame이어야 합니다.")
     columns = {key: config.get("columns", key, fallback=name) for key, name in FIELDS.items()}
@@ -69,8 +88,10 @@ def prepare_rows(df: pd.DataFrame, config: Any, target: date) -> tuple[pd.DataFr
         raise ValueError(f"보고서 쿼리 필수 컬럼 누락: {missing}. SQL 오류 여부와 컬럼 매핑을 확인하세요.")
     data = pd.DataFrame({key: df[col] if col in df.columns else "" for key, col in columns.items()}, index=df.index)
     queried = len(data)
-    mask = data["date"].map(local_day) == target
+    days = data["date"].map(local_day)
+    mask = days.map(lambda day: target <= day <= end).astype(bool)
     data = data.loc[mask].copy()
+    data["date"] = days.loc[mask].map(lambda day: day.isoformat())
     outside = queried - len(data)
     data["id"] = data["id"].map(text)
     if data["id"].eq("").any():
@@ -87,7 +108,8 @@ def prepare_rows(df: pd.DataFrame, config: Any, target: date) -> tuple[pd.DataFr
             raise ValueError("동일 출원번호·판정일시가 중복됩니다. SQL에서 최신 한 건으로 조회하세요.")
         data = data.sort_values("_order").drop_duplicates("id", keep="last").drop(columns="_order")
     for key in data.columns:
-        data[key] = data[key].map(text)
+        # Empty filtered columns can retain numeric/boolean DB dtypes.
+        data[key] = data[key].map(text).astype(str)
     data["company"] = data["company"].replace("", "업체명 미확인")
     data["major"] = data["major"].replace("", "미분류")
     data["prediction"] = data["prediction"].where(data["prediction"].isin(["진성", "가성"]), "보류/미판정")
@@ -106,12 +128,16 @@ def counts(group: pd.DataFrame) -> dict:
             "false_pct": round(false / valid * 100, 1) if valid else None}
 
 
-def aggregate(data: pd.DataFrame, target: date, metadata: dict) -> dict:
+def aggregate(data: pd.DataFrame, target: date, metadata: dict, end_date: date | None = None) -> dict:
+    end = end_date or target
     companies = [{"company": name, **counts(group)} for name, group in data.groupby("company", sort=True)]
     companies.sort(key=lambda c: (-c["false"], -c["total"], c["company"]))
     issues = [{"major": name, **counts(group)} for name, group in data.groupby("major", sort=True)]
     issues.sort(key=lambda i: (-i["total"], i["major"]))
-    return {"date": target.isoformat(), "overall": counts(data), "companies": companies,
+    return {"date": target.isoformat(), "start_date": target.isoformat(), "end_date": end.isoformat(),
+            "period_label": target.isoformat() if target == end else f"{target} ~ {end}",
+            "report_type": "일일" if target == end else "기간",
+            "overall": counts(data), "companies": companies,
             "issues": issues, "data_checks": metadata}
 
 
@@ -119,7 +145,7 @@ def case_batches(data: pd.DataFrame, max_chars: int, field_chars: int) -> list[l
     batches, batch, size = [], [], 2
     for row in data.to_dict("records"):
         case = {}
-        for key in ("id", "company", "prediction", "major", "title", "phenomenon", "action", "reason"):
+        for key in ("id", "company", "date", "prediction", "major", "title", "phenomenon", "action", "reason"):
             value = row[key]
             if key in {"title", "phenomenon", "action", "reason"}:
                 value = html_to_text(remove_embedded_assets(value))
@@ -168,7 +194,8 @@ def analyse(data: pd.DataFrame, stats: dict, prompt: str, llm: Any, config: Any,
     partials = [None] * len(batches)
 
     def analyse_batch(batch: list[dict]) -> dict:
-        part = invoke_json(llm, prompt + PART_SCHEMA, json.dumps({"date": stats["date"], "cases": batch}, ensure_ascii=False))
+        payload = {"start_date": stats["start_date"], "end_date": stats["end_date"], "cases": batch}
+        part = invoke_json(llm, prompt + PART_SCHEMA, json.dumps(payload, ensure_ascii=False))
         validate_notes(part.get("observations"), {c["id"] for c in batch})
         if not 1 <= len(part["observations"]) <= 4:
             raise ValueError("분할 분석 관찰은 1~4개여야 합니다.")
@@ -203,6 +230,9 @@ def analyse(data: pd.DataFrame, stats: dict, prompt: str, llm: Any, config: Any,
 
 def render_html(stats: dict, narrative: dict, demo: bool = False) -> str:
     esc = lambda value: escape(str(value), quote=True)
+    period = stats.get("period_label", stats["date"])
+    report_type = stats.get("report_type", "일일")
+    summary_title = "오늘의 요약" if report_type == "일일" else "기간 요약"
     def table(headers: list, rows: list) -> str:
         head = "".join(f'<th style="padding:11px 10px;text-align:left;border-bottom:2px solid #cad5d7;background:#edf3f3">{esc(h)}</th>' for h in headers)
         body = "".join("<tr>" + "".join(f'<td style="padding:10px;border-bottom:1px solid #e1e5e7">{esc(c)}</td>' for c in row) + "</tr>" for row in rows)
@@ -216,14 +246,14 @@ def render_html(stats: dict, narrative: dict, demo: bool = False) -> str:
     issue_rows = [[c["major"], c["total"], c["true"], c["false"]] for c in stats["issues"]]
     demo_banner = '<p style="background:#fff1d6;padding:12px;font-weight:bold">시연용 가상 데이터 · 예시 문장 (DB/API 미호출)</p>' if demo else ""
     action_html = "".join(f'<li style="margin-bottom:8px">{esc(a)}</li>' for a in narrative["actions"])
-    return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(stats['date'])} 작업중지권 일일 보고서</title></head>
+    return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(period)} 작업중지권 {esc(report_type)} 보고서</title></head>
 <body style="margin:0;background:#f2f4f5;color:#243331;font-family:'Malgun Gothic',Arial,sans-serif;line-height:1.7">
 <main style="max-width:980px;margin:0 auto;background:#fff;padding:28px 24px">
-{demo_banner}<p style="color:#087e79;font-weight:bold;margin:0">안전관리 일일 현황</p>
-<h1 style="font-size:26px;margin:6px 0">{esc(stats['date'])} 작업중지권 보고서</h1>
-<p style="color:#65736e;margin:0">대상일 등록 사례 · 업체별 AI 판정 및 주요 이슈</p>
+{demo_banner}<p style="color:#087e79;font-weight:bold;margin:0">안전관리 {esc(report_type)} 현황</p>
+<h1 style="font-size:26px;margin:6px 0">{esc(period)} 작업중지권 보고서</h1>
+<p style="color:#65736e;margin:0">대상 기간 등록 사례 · 업체별 AI 판정 및 주요 이슈</p>
 {table(['전체 등록', 'AI 진성', 'AI 가성', '보류·미판정'], metric_rows)}
-<h2 style="font-size:19px;border-top:2px solid #087e79;padding-top:20px">오늘의 요약</h2><p>{esc(narrative['overview'])}</p>
+<h2 style="font-size:19px;border-top:2px solid #087e79;padding-top:20px">{summary_title}</h2><p>{esc(narrative['overview'])}</p>
 <h2 style="font-size:19px;margin-top:30px">등록 유형별 현황</h2>{table(['등록 분류', '전체', 'AI 진성', 'AI 가성'], issue_rows)}
 {notes(narrative['issues'], 'title')}
 <h2 style="font-size:19px;margin-top:30px">업체별 현황</h2><p style="font-size:12px;color:#65736e">AI 가성 건수 내림차순 · 가성 비율 = 가성 / (진성 + 가성), 보류·미판정 제외</p>
@@ -234,7 +264,8 @@ def render_html(stats: dict, narrative: dict, demo: bool = False) -> str:
 </main></body></html>'''
 
 
-def demo_data(target: date) -> pd.DataFrame:
+def demo_data(target: date, end_date: date | None = None) -> pd.DataFrame:
+    days = ((end_date or target) - target).days + 1
     specs = [
         ("시연 A설비", "배관/서포트", 8, 5, "협소 구간 배관 밟음 협의", "작업방법 협의 후 작업 진행"),
         ("시연 B시공", "서류/행정", 12, 2, "작업허가서 서명 누락", "서류 보완 후 작업 진행"),
@@ -244,7 +275,7 @@ def demo_data(target: date) -> pd.DataFrame:
     for company, major, total, true_count, phenomenon, action in specs:
         for i in range(total):
             rows.append({"출원번호": f"DEMO-{len(rows)+1:04d}", "업체명": company,
-                         "등록일": target.isoformat(), "AI판정": "진성" if i < true_count else "가성",
+                         "등록일": (target + timedelta(days=len(rows) % days)).isoformat(), "AI판정": "진성" if i < true_count else "가성",
                          "제목": phenomenon, "대분류": major, "현상": phenomenon,
                          "조치": action, "판단근거": "시연용 가상 판정", "에러여부": False})
     return pd.DataFrame(rows)
@@ -261,37 +292,42 @@ def demo_narrative(data: pd.DataFrame, stats: dict) -> dict:
 
 
 def run_report(config_path: str = "daily_report.ini", target_date: str | None = None,
-               *, demo: bool = False, llm: Any = None) -> Path:
+               *, start_date: str | None = None, end_date: str | None = None,
+               demo: bool = False, llm: Any = None) -> Path:
     install_timestamped_print()
+    start, end = resolve_period(target_date, start_date, end_date)
     config_file = Path(config_path).resolve()
     config = load_config(str(config_file))
     root = config_file.parent
     path = lambda key, fallback: (root / config.get("report", key, fallback=fallback)).resolve()
-    target = date.fromisoformat(target_date) if target_date else datetime.now(KST).date() - timedelta(days=1)
-    output = path("output_dir", "outputs/daily_reports") / f'{target}_{datetime.now(KST):%H%M%S_%f}'
+    period_key = start.isoformat() if start == end else f"{start}_{end}"
+    output = path("output_dir", "outputs/daily_reports") / f'{period_key}_{datetime.now(KST):%H%M%S_%f}'
     output.mkdir(parents=True, exist_ok=False)
     api = None
     if not demo:
         api = load_config(str(path("api_config", "config.ini")))
-    print(f"[daily-report] date={target}, output={output}", flush=True)
+    print(f"[daily-report] period={start}~{end}, output={output}", flush=True)
     if demo:
-        df = demo_data(target).rename(columns={name: config.get("columns", key, fallback=name)
+        df = demo_data(start, end).rename(columns={name: config.get("columns", key, fallback=name)
                                              for key, name in FIELDS.items()})
     else:
         query = path("query_file", "queries/daily_company_report.sql").read_text(encoding="utf-8-sig")
         if not any(line.strip().strip(";") for line in query.splitlines() if not line.lstrip().startswith("--")):
             raise ValueError("보고서 전용 SQL에 실제 조회 쿼리를 입력하세요.")
-        query = query.replace("{target_date}", target.isoformat()).replace("{next_date}", (target + timedelta(days=1)).isoformat())
+        dates = {"target_date": start, "start_date": start, "end_date": end, "next_date": end + timedelta(days=1)}
+        for key, value in dates.items():
+            query = query.replace("{" + key + "}", value.isoformat())
         df = load_execute_sql(api)(query)
-    data, metadata = prepare_rows(df, config, target)
-    stats = aggregate(data, target, metadata)
+    data, metadata = prepare_rows(df, config, start, end)
+    stats = aggregate(data, start, metadata, end)
     save_json(output / "summary.json", stats)
-    print(f"[daily-report] rows={len(data)}, companies={len(stats['companies'])}", flush=True)
+    print(f"[daily-report] queried_rows={metadata['queried_rows']}, outside_date_rows={metadata['outside_date_rows']}, "
+          f"rows={len(data)}, companies={len(stats['companies'])}", flush=True)
     partials = []
     if demo:
         narrative = demo_narrative(data, stats)
     elif data.empty:
-        narrative = {"overview": "대상일에 조회된 작업중지권 사례가 없습니다.", "issues": [], "companies": [], "actions": []}
+        narrative = {"overview": "대상 기간에 조회된 작업중지권 사례가 없습니다.", "issues": [], "companies": [], "actions": []}
     else:
         prompt = path("prompt_file", "policies/daily_company_report.md").read_text(encoding="utf-8-sig")
         if not prompt.strip():
@@ -301,7 +337,8 @@ def run_report(config_path: str = "daily_report.ini", target_date: str | None = 
             narrative, partials = analyse(data, stats, prompt, llm or create_llm(api), config,
                                           output / "partial_analysis.json")
         except Exception as exc:
-            save_json(output / "error.json", {"error": str(exc), "date": target.isoformat()})
+            save_json(output / "error.json", {"error": str(exc), "date": start.isoformat(),
+                                               "start_date": start.isoformat(), "end_date": end.isoformat()})
             print(f"[daily-report] report failed; summary retained: {output}", flush=True)
             raise
     save_json(output / "partial_analysis.json", partials)
@@ -309,7 +346,7 @@ def run_report(config_path: str = "daily_report.ini", target_date: str | None = 
     html = render_html(stats, narrative, demo)
     report_file = output / "report.html"
     report_file.write_text(html, encoding="utf-8")
-    subject = f'{"[시연] " if demo else ""}[작업중지권] {target} 업체별 일일 보고서'
+    subject = f'{"[시연] " if demo else ""}[작업중지권] {stats["period_label"]} 업체별 {stats["report_type"]} 보고서'
     save_json(output / "mail_content.json", {"subject": subject, "html_body": html,
                                              "text_summary": narrative["overview"], "demo": demo})
     print(f"[daily-report] done: {report_file}", flush=True)

@@ -1,5 +1,6 @@
--- 업체별 일일 보고서 전용 SELECT 쿼리를 여기에 넣으세요.
--- {target_date}: 조회 기준일, {next_date}: 그 다음날 (YYYY-MM-DD)
+-- 업체별 일일/기간 보고서 전용 SELECT 쿼리를 여기에 넣으세요.
+-- {start_date}: 시작일, {end_date}: 종료일 (양 끝 날짜 포함, YYYY-MM-DD)
+-- {next_date}: 종료일 다음날, {target_date}: 시작일과 동일 (기존 일일 쿼리 호환)
 -- 필수 컬럼: 출원번호, 업체명, 등록일, AI판정
 -- 분석용 권장 컬럼: 제목, 대분류, 현상, 조치, 판단근거, 에러여부, 판정일시
 -- 컬럼명이 다르면 daily_report.ini의 [columns]에서 매핑할 수 있습니다.
@@ -9,5 +10,5 @@
 --
 -- SELECT ...
 -- FROM ...
--- WHERE 등록일 >= '{target_date}'::date
+-- WHERE 등록일 >= '{start_date}'::date
 --   AND 등록일 < '{next_date}'::date
