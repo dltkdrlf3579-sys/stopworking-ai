@@ -53,7 +53,7 @@ class DailyReportTest(unittest.TestCase):
                                      ("E", 10, 15), ("F", 0, 10), ("ONE", 0, 1), ("ZERO", 50, 0),
                                      ("업체명 미확인", 0, 100)]
         ]
-        self.assertEqual([c["company"] for c in select_focus_companies(companies)], ["B", "A", "C", "D", "E"])
+        self.assertEqual([c["company"] for c in select_focus_companies(companies)], ["B", "A", "C"])
         self.assertEqual(select_focus_companies([companies[7]]), [])
 
     def test_brief_requires_selected_companies_false_evidence_and_short_advice(self):
@@ -201,7 +201,7 @@ class DailyReportTest(unittest.TestCase):
         self.assertIn("&lt;script&gt;", html)
         self.assertIn("100.0%", html)
 
-    def test_html_only_shows_five_company_rows_and_no_long_sections(self):
+    def test_html_only_shows_three_company_rows_and_no_long_sections(self):
         df = source().iloc[[0]].copy()
         frames = []
         for i in range(8):
@@ -213,11 +213,11 @@ class DailyReportTest(unittest.TestCase):
         data, meta = prepare_rows(pd.concat(frames, ignore_index=True), settings(), date(2026, 9, 8))
         stats = aggregate(data, date(2026, 9, 8), meta)
         self.assertEqual(len(stats["companies"]), 8)
-        self.assertEqual(len(stats["focus_companies"]), 5)
+        self.assertEqual(len(stats["focus_companies"]), 3)
         html = render_html(stats, {"overview": "핵심 요약", "companies": [], "actions": ["준비사항 확인"]})
-        self.assertEqual(html.count('data-company-row="true"'), 5)
-        self.assertIn("업체-4", html)
-        self.assertNotIn("업체-5", html)
+        self.assertEqual(html.count('data-company-row="true"'), 3)
+        self.assertIn("업체-2", html)
+        self.assertNotIn("업체-3", html)
         self.assertNotIn("등록 유형별 현황", html)
         self.assertNotIn("후속 확인사항", html)
         self.assertIn("개선 조언", html)
@@ -239,12 +239,13 @@ class DailyReportTest(unittest.TestCase):
                 seen.extend(row["id"] for row in rows)
                 return {"observations": [{"title": "등록 사유", "detail": "기록 확인", "ids": [rows[0]["id"]]}]}
             self.assertEqual(payload["statistics"]["overall"]["total"], 5)
+            self.assertEqual([c["company"] for c in payload["statistics"]["companies"]], ["A업체"])
             self.assertEqual(payload["statistics"]["end_date"], "2026-09-08")
             return brief_response(payload)
         with tempfile.TemporaryDirectory() as temp, patch("stopright_ai.daily_company_report.invoke_json", fake_invoke):
             result, partials = analyse(data, stats, "지침", object(), config, Path(temp) / "partial.json")
-        self.assertCountEqual(seen, data["id"].tolist())
-        self.assertEqual(sum(p["analysed_rows"] for p in partials), 5)
+        self.assertCountEqual(seen, data.loc[data["company"].eq("A업체"), "id"].tolist())
+        self.assertEqual(sum(p["analysed_rows"] for p in partials), 2)
         self.assertEqual(result["overview"], "보고서 요약")
         self.assertEqual([c["company"] for c in result["companies"]], ["A업체"])
 

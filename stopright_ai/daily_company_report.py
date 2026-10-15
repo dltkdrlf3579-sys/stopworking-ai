@@ -138,7 +138,7 @@ def counts(group: pd.DataFrame) -> dict:
 
 def select_focus_companies(companies: list[dict]) -> list[dict]:
     eligible = [c for c in companies if c["false"] > 0 and c["company"] != "업체명 미확인"]
-    return sorted(eligible, key=lambda c: (-c["false"], -c["false"] / (c["true"] + c["false"]), c["company"]))[:5]
+    return sorted(eligible, key=lambda c: (-c["false"], -c["false"] / (c["true"] + c["false"]), c["company"]))[:3]
 
 
 def aggregate(data: pd.DataFrame, target: date, metadata: dict, end_date: date | None = None) -> dict:
@@ -228,10 +228,11 @@ def analyse(data: pd.DataFrame, stats: dict, prompt: str, llm: Any, config: Any,
     field_chars = config.getint("report", "max_case_chars", fallback=800)
     if max_chars < 1000 or field_chars < 50:
         raise ValueError("max_batch_chars는 1000 이상, max_case_chars는 50 이상이어야 합니다.")
-    batches = [batch for _, group in data.groupby("company", sort=True)
+    focus_names = {c["company"] for c in stats["focus_companies"]}
+    focus_data = data.loc[data["company"].isin(focus_names)]
+    batches = [batch for _, group in focus_data.groupby("company", sort=True)
                for batch in case_batches(group, max_chars, field_chars)]
     partials = [None] * len(batches)
-    focus_names = {c["company"] for c in stats["focus_companies"]}
 
     def analyse_batch(batch: list[dict]) -> dict:
         payload = {"start_date": stats["start_date"], "end_date": stats["end_date"], "cases": batch,
@@ -253,7 +254,8 @@ def analyse(data: pd.DataFrame, stats: dict, prompt: str, llm: Any, config: Any,
     print("[daily-report] composing report", flush=True)
     focus_ids = {c["company"]: set(data.loc[data["company"].eq(c["company"]) & data["prediction"].eq("가성"), "id"])
                  for c in stats["focus_companies"]}
-    payload = json.dumps({"statistics": stats, "observations": partials,
+    final_stats = {**stats, "companies": stats["focus_companies"]}
+    payload = json.dumps({"statistics": final_stats, "observations": partials,
                           "focus_false_case_ids": {name: sorted(ids) for name, ids in focus_ids.items()}}, ensure_ascii=False)
     if len(payload) > config.getint("report", "max_final_chars", fallback=100000):
         raise ValueError("최종 종합 입력 한도를 초과했습니다. summary.json과 partial_analysis.json을 확인하세요.")
