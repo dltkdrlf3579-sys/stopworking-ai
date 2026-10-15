@@ -29,7 +29,7 @@ PART_SCHEMA = '''
 {"observations": [{"title": "주요 등록 사유", "detail": "원문에서 확인한 사실과 판정 사유 2문장 이내", "ids": ["출원번호"]}]}
 이 호출에는 한 업체의 사례만 제공된다. 핵심 관찰 1~4개만 출력한다.
 가성 사례가 있다면 등록 계기와 기존 AI의 가성 판정 근거를 분리해 설명한다.
-focus_company=true이면 가성 사례의 반복 원인, 작업 전 준비로 예방할 수 있었던 사항과 개선 조언의 근거를 우선 추출한다.
+focus_company=true이면 가성으로 분류된 등록 사유와 자체 조치·일반 문의로 처리 가능한 근거를 우선 추출한다. 등록 필요성을 확인해야 하는 위험·승인 조건도 구분한다.
 권고는 사실과 구분하며, 위험한 작업을 계속하거나 신고를 줄이도록 권하지 않는다.
 "협의가 많음" 같은 단어 요약에서 끝내지 말고 무엇 때문에 어떤 조치·협의를 했는지 설명한다.
 빈도 수치를 만들지 말고, 각 관찰에 실제 입력 출원번호를 1~5개 연결한다.
@@ -38,19 +38,21 @@ FINAL_SCHEMA = '''
 [최종 보고서 출력]
 {
   "overview": "핵심 현황 1~2문장, 공백 포함 140자 이내",
-  "companies": [{"company": "업체명", "detail": "주요 가성 사유 한 문장, 80자 이내", "recommendation": "원인에 대응하는 구체적 개선 조언 한 문장, 80자 이내", "ids": ["해당 업체의 가성 출원번호"]}],
+  "companies": [{"company": "업체명", "detail": "주요 가성 등록 사유 한 문장, 80자 이내", "recommendation": "자체 처리·일반 문의와 작업중지권 등록을 구분하는 안내 한 문장, 80자 이내", "ids": ["해당 업체의 가성 출원번호"]}],
   "actions": ["공통 실행사항 한 문장, 80자 이내"]
 }
 PPT 한 장 분량의 핵심 보고다. 긴 분석, 별도 유형별 목록, 반복 설명은 출력하지 않는다.
 companies에는 statistics.focus_companies의 업체를 빠짐없이 한 번씩만 같은 순서로 출력한다. 없으면 빈 배열이다.
 업체 선정과 숫자는 코드가 확정한다. 업체를 추가하거나 순위를 바꾸지 않는다.
 detail은 무슨 일로 등록했고 기존 AI가 왜 가성으로 판단했는지 핵심 원인을 적는다.
-recommendation은 그 원인에 대응하여 누가 작업 전에 무엇을 확인·준비·보완할지 적는다.
+recommendation은 시설 개선이나 일반적인 안전교육 대신, 해당 등록 사유를 어떤 조건에서 자체 조치·일반 문의로 처리할 수 있는지 안내한다.
+예: 위험이나 필수 승인 문제가 없는 단순 일정 문의는 작업중지권 대신 일반 문의로 처리하도록 안내한다. 이 예시를 해당 근거가 없는 업체에 적용하지 않는다.
+자체 처리 권한·사내 절차가 입력에 없으면 승인된 기준 확인을 조건으로 안내하며, 존재하지 않는 절차를 만들지 않는다.
 "교육 강화", "주의 필요"처럼 모든 업체에 붙일 수 있는 추상적 조언은 피한다.
 근거가 부족하면 원인 확인 및 기록 보완을 제안하고, 잘못이나 개선 효과를 추측하지 않는다.
 각 업체 ids는 같은 업체의 실제 가성 사례 1~3개로 제한한다. actions는 최대 2개이다.
 업체별 표와 수치는 코드가 표시하므로 회사 설명에서 건수·비율을 반복하지 않는다.
-가성 감소는 사전 준비와 위험 제거로 같은 등록 사유를 예방한다는 뜻이다. 신고 억제, 보고 건수 할당, 위험 감수를 권하지 않는다.
+목적은 작업중지권 대신 승인된 자체 처리·일반 문의로 해결 가능한 등록을 구분해 불필요한 작업중단과 운영부서 대응을 줄이는 것이다. AI 가성 판정만으로 등록 금지를 지시하지 않는다. 위험·미상 물질·필수 안전승인 문제가 있거나 불명확하면 자체 처리 대상으로 단정하지 않는다.
 통계에는 전수 집계만 사용한다. 분할 관찰은 대표 근거이지 주제별 전체 빈도가 아니다.
 '''
 
@@ -281,7 +283,7 @@ def render_html(stats: dict, narrative: dict, demo: bool = False) -> str:
         for key, label, color in [("total", "전체 등록", "#83908b"), ("true", "AI 진성", "#317db0"),
                                   ("false", "AI 가성", "#d49037"), ("pending", "보류·미판정", "#b5bdbc")]
     )
-    headers = [("업체명", 18), ("가성 건수", 10), ("가성 비율", 10), ("주요 가성 사유", 31), ("개선 조언", 31)]
+    headers = [("업체명", 18), ("가성 건수", 10), ("가성 비율", 10), ("주요 가성 등록 사유", 31), ("자체 처리·등록 구분 안내", 31)]
     head = "".join(f'<th style="width:{width}%;padding:9px 8px;text-align:left;background:#edf3f3;border-bottom:2px solid #bfcfcb">{label}</th>' for label, width in headers)
     rows = []
     for company in focus:
@@ -298,7 +300,7 @@ def render_html(stats: dict, narrative: dict, demo: bool = False) -> str:
 <body style="margin:0;background:#f2f4f5;color:#243331;font-family:'Malgun Gothic',Arial,sans-serif;line-height:1.5;overflow-wrap:anywhere">
 <main style="max-width:1120px;margin:0 auto;background:#fff;padding:22px 24px">
 {demo_banner}<h1 style="font-size:22px;margin:0">작업중지권 핵심 보고</h1>
-<p style="font-size:13px;color:#65736e;margin:3px 0 12px">{esc(period)} · 업체별 가성 사유 및 개선 조언</p>
+<p style="font-size:13px;color:#65736e;margin:3px 0 12px">{esc(period)} · 가성 등록 사유 및 자체 처리·일반 문의 안내</p>
 <table style="width:100%;table-layout:fixed;border-collapse:collapse"><tbody><tr>{metric_cells}</tr></tbody></table>
 <p style="font-size:14px;margin:12px 0 16px">{esc(narrative['overview'])}</p>
 <h2 style="font-size:17px;margin:0 0 4px">가성 다발 업체 {len(focus)}곳</h2>
@@ -331,7 +333,7 @@ def demo_narrative(data: pd.DataFrame, stats: dict) -> dict:
     for company in stats["focus_companies"]:
         cases = data.loc[data["company"].eq(company["company"]) & data["prediction"].eq("가성")]
         if company["company"] == "시연 B시공":
-            detail, recommendation = "허가서 서명 누락 후 보완하는 사례로 구성된 시연 자료입니다.", "작업 책임자가 착수 전 서명·허가 항목을 확인하도록 안내합니다."
+            detail, recommendation = "허가서 서명 누락 후 보완하는 사례로 구성된 시연 자료입니다.", "필수 안전승인 누락인지 확인하고, 단순 서류 보완이면 사내 절차에 따른 처리 경로를 안내합니다."
         else:
             detail, recommendation = "시연용 판정만 있어 실제 가성 원인은 확인할 수 없습니다.", "담당자가 해당 사례의 원문과 가성 판단 근거를 먼저 확인합니다."
         companies.append({"company": company["company"], "detail": detail, "recommendation": recommendation,

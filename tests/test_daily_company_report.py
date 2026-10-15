@@ -220,7 +220,8 @@ class DailyReportTest(unittest.TestCase):
         self.assertNotIn("업체-3", html)
         self.assertNotIn("등록 유형별 현황", html)
         self.assertNotIn("후속 확인사항", html)
-        self.assertIn("개선 조언", html)
+        self.assertIn("자체 처리·등록 구분 안내", html)
+        self.assertNotIn("개선 조언", html)
 
     def test_ai_receives_each_company_separately_and_full_statistics(self):
         config = settings()
